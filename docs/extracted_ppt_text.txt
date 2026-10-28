@@ -1,0 +1,38 @@
+Total slide: 12
+
+=== SLIDE 1 ===
+ANALISIS KINEMATIK & EVALUASI POSTUR OLAHRAGA Real-time berbasis AI Pose Estimation pada sistem SKELIO PRESENTASI BIG DATA • KELOMPOK 11 FAKULTAS TEKNIK | PROGRAM STUDI TEKNIK INFORMATIKA Rizma Indra Pramudya ( 25051204370 ) | I zora Elverda Narulita Putri ( 25051204287 ) Putera Al Khalidi ( 25051204362 ) | Muhammad Abdullah Ro'in ( 25051204270 )
+
+=== SLIDE 2 ===
+Mengapa SKELIO dikemb angkan ? 01 • LATAR BELAKANG Latihan Mandiri Push-up, squat, dan sit-up berisiko dilakukan dengan postur yang kurang tepat. Risiko dan keterbatasan Kesalahan gerak dapat mengurangi efektivitas latihan dan meningkatkan risiko cedera. GAGASAN UTAMA Mengubah video kamera menjadi informasi gerakan yang dapat dianalisis dan memberi umpan balik secara real-time. Pendekatan markerless: tanpa penanda fisik khusus pada tubuh pengguna. KELOM POK 11 • BIG DATA • UNIVERSITAS NEGERI SURABAYA 2026
+
+=== SLIDE 3 ===
+PENDAHULUAN SISTEM SKELIO P ostur Keliru : Risiko cedera sendi tulang belakang. Risiko Latihan M andiri T anpa Trainer: Minim koreksi teknis secara langsung. YOLOv11-P ose : Deteksi titik sendi tanpa penanda. So lusi AI SKELIO F ilter Adaptif: Redam getaran koordinat secara instan. S ensor Invasif : Membatasi kebebasan gerak alami tubuh. Kendala M etode Lab B iaya Tinggi: Tidak praktis untuk pemakaian harian. Latar Belakang & Urgens i Masalah
+
+=== SLIDE 4 ===
+Rumusan M asalah Fokus, Tujuan & Batasan S istem PENDAHULUAN SISTEM SKELIO Ek straksi Stabil: Integrasi model dan peredam getaran. Perform a Nyata: Evaluasi akurasi dan kecepatan komputasi. G erakan Kalistenik: Khusus push-up, squat, dan sit-up. Targe t Komputasi: Pemrosesan hingga maksimal 45 FPS. Pip eline Cepat: Pemrosesan multi-subjek hingga 3 orang. Uj i Empiris: Verifikasi terhadap data acuan manual. Batasan Pene litian Tujuan P enelitian Hitung an Otomatis: Estimasi sudut dan fase repetisi. Kine matika FSM: Validasi gerakan berbasis geometri sendi . I nput Kamera: Resolusi 640p bidang pandang samping.
+
+=== SLIDE 5 ===
+Alur Pipelin e Komputasi SKELIO Single-Stage : Inferensi langsu ng koordinat sendi. Tahap 1 Fitur C2PSA: T angani oklusi parsial tubuh. KAJIAN TEORETIS (BAB II) YOLOv11-Pose Asosiasi Ganda: Pertahankan deteksi s kor rendah. Multi-Subjek: Ko nsistensi ID hingga 3 orang. ByteTrack Cutoff Adaptif : Redam jitter saat posisi statis. Bebas Jeda: Responsif sa at transisi eksplosif. One-Euro Filter Sudut Kosinus: Evaluasi artikulasi sagital. State Machine: Hitu ng siklus repetisi valid. Kinematik & FSM Tahap 2 Tahap 3 Tahap 4
+
+=== SLIDE 6 ===
+Penelitian yang Relevan RUJUKAN ILMIAH (BAB II) arxiv. org/abs/2410.17725 Khanam & Hussain: Architectural Enhancements YOLOv11-Pose (2024) doi. org/10.1145/2207676.2208639 Haberkamp dkk. (2022) & Fukushima dkk. (2024) Validasi AI vs MoCap (2022 & 2024) doi.org/10.3390/sports11020162 Sousa dkk.: Movement Description Language FSM & Exercise Assessment (2024) arxiv.org/abs/2110.06864 Zhang dkk.: Associating Every Detection Box ByteTrack Multi-Object (2022) arxiv.org/abs/2204.06806 Maji dkk.: Enhancing YOLO for Pose Estimation YOLO-Pose Multi-Person (2022) doi.org/10.1371/journal.pcbi.1008935 Stenum dkk.: Video-Based Gait & Joint Angles 2D Kinematics Analysis (2021)
+
+=== SLIDE 7 ===
+Ker angka Konseptual Permasalahan Kesalahan postur, fluktuasi keypoints, dan inkonsistensi pelacakan. Input Sistem Video gerakan push-up, squat, dan sit-up dari kamera. YOLOv11-Pose → ByteTrack → One-Euro Filter. Pemrosesan AI Perhitungan sudut sendi, evaluasi postur, dan FSM untuk menghitung repetisi. Analisis Kinematik Visualisasi skeleton, status postur, jumlah repetisi, FPS, dan latensi; dibandingkan dengan ground truth. Keluaran dan Evaluasi
+
+=== SLIDE 8 ===
+Deteksi Po se Hipotesis Penelitian YOLOv11-Po se mampu mendeteksi titik kunci anatomi tubuh pada gerakan push-up, squat, dan sit-up secara real-time. A nalisis geometri titik kunci, sudut sendi, dan FSM mampu mendukung evaluasi postur serta penghitungan repetisi secara otomatis. Byt eTrack mampu mempertahankan konsistensi identitas subjek antar-frame untuk mendukung analisis gerakan. Evaluasi Gerak an Pelacakan Id entitas
+
+=== SLIDE 9 ===
+Eksperimen reseach & Development Pengembangan Sistem Jenis & Pendekatan Berbasis YOLOv11-Pose dan ByteTrack Skenario Pengujian Analisis gerak 1-3 subjek secara real-time Ruang Lingkup Uji Latihan Kalistenik : Push-up, Squat, Sit-up Alur pemrosesan sistem Arsitektur Ruang Lingkup Uji Tangkapan frame kamera real-time Deteksi Pose Ekstraksi 14 titik kunci YOLOv11 Stabilisasi Pelacakan identitas & penyaringan sinyal Evaluasi Kinematik Klasifikasi postur dan repetisi otomatis
+
+=== SLIDE 10 ===
+Fokus Evaluasi Data Teknik Analisis Kinerja Komputasi Pengukuran stabilitas FPS dan latensi Akurasi Repetisi Evaluasi Postur Stabilitas Koordinat Presentase kesalahan komperatif Kesesuaikan kategori dengan data acuan Penyaringan getaran antar-frame
+
+=== SLIDE 11 ===
+K esimpulan Latihan kalistenik mandiri yang rentan terhadap kesalahan postur biomekanik mendorong pengembangan sistem SKELIO berbasis YOLOv11-Pose untuk mengekstraksi 14 titik kunci anatomi tubuh pengguna tanpa penanda fisik. Sistem ini mengintegrasikan algoritma ByteTrack untuk mempertahankan identitas pelacakan hingga tiga subjek secara bersamaan dan One-Euro Filter untuk menstabilkan fluktuasi koordinat akibat derau sensor. Koordinat yang telah stabil kemudian diproses melalui analisis kinematik berbasis Hukum Kosinus untuk menghitung perubahan sudut persendian selama latihan berlangsung. Melalui integrasi aturan Finite State Machine (FSM), sistem akhirnya mampu mengenali fase gerakan, mengevaluasi ketepatan postur, dan menghitung jumlah repetisi secara otomatis yang akurasinya diuji terhadap data acuan manual.
+
+=== SLIDE 12 ===
+Terima Kasih
+
