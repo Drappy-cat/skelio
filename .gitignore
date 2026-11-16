@@ -46,6 +46,7 @@ venv.bak/
 runs/
 *.engine
 *.onnx
+epoch*.pt
 output_demo/
 *.log
 apps/web/uploads/*
