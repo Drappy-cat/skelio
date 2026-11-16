@@ -210,8 +210,9 @@ class PersonState:
 # 5. CORE BIOMECHANICAL PIPELINE (SISTEM SKELIO)
 # ==============================================================================
 class BiomechanicalPipeline:
-    def __init__(self, pose_model_path=None, tracker_yaml=None):
+    def __init__(self, pose_model_path=None, tracker_yaml=None, imgsz=480):
         self.device = 0 if torch.cuda.is_available() else 'cpu'
+        self.imgsz = imgsz
         
         base_dir = os.path.dirname(os.path.abspath(__file__))
         root_dir = os.path.dirname(base_dir) if os.path.basename(base_dir) == 'core' else base_dir
@@ -300,7 +301,7 @@ class BiomechanicalPipeline:
             results = self.detector.track(
                 frame,
                 device=self.device,
-                imgsz=480,
+                imgsz=self.imgsz,
                 conf=0.35,
                 persist=True,
                 verbose=False,
@@ -310,7 +311,7 @@ class BiomechanicalPipeline:
             results = self.detector.predict(
                 frame,
                 device=self.device,
-                imgsz=480,
+                imgsz=self.imgsz,
                 conf=0.35,
                 verbose=False
             )
@@ -358,26 +359,32 @@ class BiomechanicalPipeline:
 
         return detected
 
-    def stage3_visualize_and_evaluate(self, keypoints, confidences, hands_data, frame, pstate, person_rank):
-        p_color = _PERSON_COLORS[min(person_rank, len(_PERSON_COLORS) - 1)]
-        h, w = frame.shape[:2]
-
-        if len(keypoints) == 17:
-            skeleton_limbs = [
+    def _skeleton_config(self, num_kpts):
+        """Mengembalikan daftar limb skeleton dan indeks sendi utama untuk format 17 atau 13 keypoint."""
+        if num_kpts == 17:
+            limbs = [
                 (0, 1), (0, 2), (1, 3), (2, 4),
                 (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
                 (5, 11), (6, 12), (11, 12),
                 (11, 13), (13, 15), (12, 14), (14, 16)
             ]
-            k_sh_l, k_elb_l, k_wri_l, k_hip_l, k_kne_l, k_ank_l = 5, 7, 9, 11, 13, 15
-            k_sh_r, k_elb_r, k_wri_r, k_hip_r, k_kne_r, k_ank_r = 6, 8, 10, 12, 14, 16
+            indices = (5, 7, 9, 11, 13, 15, 6, 8, 10, 12, 14, 16)
         else:
-            skeleton_limbs = [
+            limbs = [
                 (0, 1), (0, 2), (1, 2), (1, 3), (3, 4), (2, 5), (5, 6),
                 (1, 7), (2, 8), (7, 8), (7, 9), (9, 11), (8, 10), (10, 12)
             ]
-            k_sh_l, k_elb_l, k_wri_l, k_hip_l, k_kne_l, k_ank_l = 1, 3, 4, 7, 9, 11
-            k_sh_r, k_elb_r, k_wri_r, k_hip_r, k_kne_r, k_ank_r = 2, 5, 6, 8, 10, 12
+            indices = (1, 3, 4, 7, 9, 11, 2, 5, 6, 8, 10, 12)
+        return limbs, indices
+
+    def stage3_visualize_and_evaluate(self, keypoints, confidences, hands_data, frame, pstate, person_rank, draw=True):
+        p_color = _PERSON_COLORS[min(person_rank, len(_PERSON_COLORS) - 1)]
+        h, w = frame.shape[:2]
+
+        skeleton_limbs, (
+            k_sh_l, k_elb_l, k_wri_l, k_hip_l, k_kne_l, k_ank_l,
+            k_sh_r, k_elb_r, k_wri_r, k_hip_r, k_kne_r, k_ank_r
+        ) = self._skeleton_config(len(keypoints))
 
         def is_valid_pt(idx):
             if idx >= len(keypoints) or confidences[idx] < 0.35:
@@ -385,34 +392,35 @@ class BiomechanicalPipeline:
             x, y = keypoints[idx]
             return 2 <= x < (w - 2) and 2 <= y < (h - 2)
 
-        # 1. Bounding Box
         valid_indices = [i for i in range(len(keypoints)) if is_valid_pt(i)]
-        if len(valid_indices) >= 4:
-            pts = keypoints[valid_indices]
-            bx_min, by_min = max(0, int(np.min(pts[:, 0])) - 15), max(0, int(np.min(pts[:, 1])) - 20)
-            bx_max, by_max = min(w - 1, int(np.max(pts[:, 0])) + 15), min(h - 1, int(np.max(pts[:, 1])) + 15)
-            cv2.rectangle(frame, (bx_min, by_min), (bx_max, by_max), (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"SKELETON {person_rank + 1}", (bx_min + 5, by_min - 8),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.45, p_color, 1, cv2.LINE_AA)
+        if draw:
+            # 1. Bounding Box
+            if len(valid_indices) >= 4:
+                pts = keypoints[valid_indices]
+                bx_min, by_min = max(0, int(np.min(pts[:, 0])) - 15), max(0, int(np.min(pts[:, 1])) - 20)
+                bx_max, by_max = min(w - 1, int(np.max(pts[:, 0])) + 15), min(h - 1, int(np.max(pts[:, 1])) + 15)
+                cv2.rectangle(frame, (bx_min, by_min), (bx_max, by_max), (0, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, f"SKELETON {person_rank + 1}", (bx_min + 5, by_min - 8),
+                            cv2.FONT_HERSHEY_DUPLEX, 0.45, p_color, 1, cv2.LINE_AA)
 
-        # 2. Limbs & Keypoints
-        for p1, p2 in skeleton_limbs:
-            if is_valid_pt(p1) and is_valid_pt(p2):
-                pt1 = (int(keypoints[p1][0]), int(keypoints[p1][1]))
-                pt2 = (int(keypoints[p2][0]), int(keypoints[p2][1]))
-                cv2.line(frame, pt1, pt2, p_color, 2, cv2.LINE_AA)
+            # 2. Limbs & Keypoints
+            for p1, p2 in skeleton_limbs:
+                if is_valid_pt(p1) and is_valid_pt(p2):
+                    pt1 = (int(keypoints[p1][0]), int(keypoints[p1][1]))
+                    pt2 = (int(keypoints[p2][0]), int(keypoints[p2][1]))
+                    cv2.line(frame, pt1, pt2, p_color, 2, cv2.LINE_AA)
 
-        for i in valid_indices:
-            x, y = int(keypoints[i][0]), int(keypoints[i][1])
-            cv2.circle(frame, (x, y), 5, p_color, -1, cv2.LINE_AA)
-            cv2.circle(frame, (x, y), 6, (0, 0, 0), 1, cv2.LINE_AA)
+            for i in valid_indices:
+                x, y = int(keypoints[i][0]), int(keypoints[i][1])
+                cv2.circle(frame, (x, y), 5, p_color, -1, cv2.LINE_AA)
+                cv2.circle(frame, (x, y), 6, (0, 0, 0), 1, cv2.LINE_AA)
 
-        # 3. Palm Center
-        for hand in hands_data:
-            wx, wy = int(hand['wrist'][0]), int(hand['wrist'][1])
-            px, py = int(hand['palm_center'][0]), int(hand['palm_center'][1])
-            cv2.line(frame, (wx, wy), (px, py), (255, 255, 0), 2, cv2.LINE_AA)
-            cv2.circle(frame, (px, py), 7, (0, 255, 0), -1, cv2.LINE_AA)
+            # 3. Palm Center
+            for hand in hands_data:
+                wx, wy = int(hand['wrist'][0]), int(hand['wrist'][1])
+                px, py = int(hand['palm_center'][0]), int(hand['palm_center'][1])
+                cv2.line(frame, (wx, wy), (px, py), (255, 255, 0), 2, cv2.LINE_AA)
+                cv2.circle(frame, (px, py), 7, (0, 255, 0), -1, cv2.LINE_AA)
 
         # Mode Gerakan
         curr_mode = self.active_mode
@@ -431,11 +439,13 @@ class BiomechanicalPipeline:
             if is_valid_pt(k_sh_l) and is_valid_pt(k_elb_l) and is_valid_pt(k_wri_l):
                 ang_l = self.calculate_angle(keypoints[k_sh_l], keypoints[k_elb_l], keypoints[k_wri_l])
                 elbow_angles.append(ang_l)
-                self.draw_angle_arc(frame, keypoints[k_sh_l], keypoints[k_elb_l], keypoints[k_wri_l], (255, 0, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_sh_l], keypoints[k_elb_l], keypoints[k_wri_l], (255, 0, 255))
             if is_valid_pt(k_sh_r) and is_valid_pt(k_elb_r) and is_valid_pt(k_wri_r):
                 ang_r = self.calculate_angle(keypoints[k_sh_r], keypoints[k_elb_r], keypoints[k_wri_r])
                 elbow_angles.append(ang_r)
-                self.draw_angle_arc(frame, keypoints[k_sh_r], keypoints[k_elb_r], keypoints[k_wri_r], (200, 0, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_sh_r], keypoints[k_elb_r], keypoints[k_wri_r], (200, 0, 255))
 
             if elbow_angles:
                 primary_angle = sum(elbow_angles) / len(elbow_angles)
@@ -454,7 +464,8 @@ class BiomechanicalPipeline:
             ref_leg = k_ank_l if is_valid_pt(k_ank_l) else (k_kne_l if is_valid_pt(k_kne_l) else None)
             if ref_leg and is_valid_pt(k_sh_l) and is_valid_pt(k_hip_l):
                 posture_angle = self.calculate_angle(keypoints[k_sh_l], keypoints[k_hip_l], keypoints[ref_leg])
-                self.draw_angle_arc(frame, keypoints[k_sh_l], keypoints[k_hip_l], keypoints[ref_leg], (0, 255, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_sh_l], keypoints[k_hip_l], keypoints[ref_leg], (0, 255, 255))
                 if posture_angle > 165:
                     status = "POSTUR SEMPURNA"
                     stat_color = (0, 255, 0)
@@ -472,11 +483,13 @@ class BiomechanicalPipeline:
             if is_valid_pt(k_hip_l) and is_valid_pt(k_kne_l) and is_valid_pt(k_ank_l):
                 ang_k_l = self.calculate_angle(keypoints[k_hip_l], keypoints[k_kne_l], keypoints[k_ank_l])
                 knee_angles.append(ang_k_l)
-                self.draw_angle_arc(frame, keypoints[k_hip_l], keypoints[k_kne_l], keypoints[k_ank_l], (255, 0, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_hip_l], keypoints[k_kne_l], keypoints[k_ank_l], (255, 0, 255))
             if is_valid_pt(k_hip_r) and is_valid_pt(k_kne_r) and is_valid_pt(k_ank_r):
                 ang_k_r = self.calculate_angle(keypoints[k_hip_r], keypoints[k_kne_r], keypoints[k_ank_r])
                 knee_angles.append(ang_k_r)
-                self.draw_angle_arc(frame, keypoints[k_hip_r], keypoints[k_kne_r], keypoints[k_ank_r], (200, 0, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_hip_r], keypoints[k_kne_r], keypoints[k_ank_r], (200, 0, 255))
 
             if knee_angles:
                 primary_angle = sum(knee_angles) / len(knee_angles)
@@ -508,11 +521,13 @@ class BiomechanicalPipeline:
             if is_valid_pt(k_sh_l) and is_valid_pt(k_hip_l) and is_valid_pt(k_kne_l):
                 ang_s_l = self.calculate_angle(keypoints[k_sh_l], keypoints[k_hip_l], keypoints[k_kne_l])
                 situp_angles.append(ang_s_l)
-                self.draw_angle_arc(frame, keypoints[k_sh_l], keypoints[k_hip_l], keypoints[k_kne_l], (255, 0, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_sh_l], keypoints[k_hip_l], keypoints[k_kne_l], (255, 0, 255))
             if is_valid_pt(k_sh_r) and is_valid_pt(k_hip_r) and is_valid_pt(k_kne_r):
                 ang_s_r = self.calculate_angle(keypoints[k_sh_r], keypoints[k_hip_r], keypoints[k_kne_r])
                 situp_angles.append(ang_s_r)
-                self.draw_angle_arc(frame, keypoints[k_sh_r], keypoints[k_hip_r], keypoints[k_kne_r], (200, 0, 255))
+                if draw:
+                    self.draw_angle_arc(frame, keypoints[k_sh_r], keypoints[k_hip_r], keypoints[k_kne_r], (200, 0, 255))
 
             if situp_angles:
                 primary_angle = sum(situp_angles) / len(situp_angles)
@@ -535,6 +550,9 @@ class BiomechanicalPipeline:
         pstate.status = status
         pstate.primary_angle = primary_angle
         pstate.posture_angle = posture_angle
+
+        if not draw:
+            return frame
 
         # 4. HUD Card
         hud_w, hud_h = 250, 145
@@ -608,6 +626,87 @@ class BiomechanicalPipeline:
 
         return frame
 
+    def reset_all_reps(self):
+        """Mereset seluruh penghitung repetisi dan status form pada setiap subjek aktif."""
+        for p in self.persons.values():
+            p.rep_count = 0
+            p.clean_reps = 0
+            p.current_rep_fault = False
+            p.stage = "UP"
+            p.depth_pct = 0.0
+
+    def process_frame_telemetry(self, frame):
+        """
+        Menjalankan inferensi pose dan evaluasi kinematika tanpa menggambar HUD OpenCV.
+        Mengembalikan koordinat ternormalisasi [0..1] dan metrik biomekanika untuk klien WebSocket.
+        """
+        now = time.time()
+        self.fps = 1.0 / max(1e-5, now - self.prev_time)
+        self.prev_time = now
+
+        h, w = frame.shape[:2]
+        persons_list = self.stage1_extract_and_smooth(frame)
+        telemetry_persons = []
+
+        for person in persons_list:
+            tid = person['track_id']
+            rank = person['rank']
+            kpts = person['keypoints']
+            conf = person['confidences']
+            pstate = self.persons[tid]
+
+            hands_data = pstate.hand_tracker.extract_hands(frame, kpts, conf)
+            self.stage3_visualize_and_evaluate(kpts, conf, hands_data, frame, pstate, rank, draw=False)
+
+            limbs, _ = self._skeleton_config(len(kpts))
+            norm_kpts = [
+                [
+                    round(float(kpts[i][0]) / max(1, w), 4),
+                    round(float(kpts[i][1]) / max(1, h), 4),
+                    round(float(conf[i]), 3)
+                ]
+                for i in range(len(kpts))
+            ]
+            norm_palms = [
+                {
+                    "label": hand["label"],
+                    "wrist": [
+                        round(float(hand["wrist"][0]) / max(1, w), 4),
+                        round(float(hand["wrist"][1]) / max(1, h), 4),
+                    ],
+                    "palm": [
+                        round(float(hand["palm_center"][0]) / max(1, w), 4),
+                        round(float(hand["palm_center"][1]) / max(1, h), 4),
+                    ],
+                }
+                for hand in hands_data
+            ]
+
+            telemetry_persons.append({
+                "track_id": tid,
+                "rank": rank + 1,
+                "rep_count": pstate.rep_count,
+                "clean_reps": pstate.clean_reps,
+                "bad_reps": max(0, pstate.rep_count - pstate.clean_reps),
+                "depth_pct": round(float(pstate.depth_pct), 1),
+                "stage": pstate.stage,
+                "status": pstate.status,
+                "primary_angle": round(float(pstate.primary_angle), 1),
+                "posture_angle": round(float(pstate.posture_angle), 1),
+                "exercise": pstate.exercise_mode,
+                "edges": limbs,
+                "keypoints": norm_kpts,
+                "palms": norm_palms,
+            })
+
+        return {
+            "fps": round(self.fps, 1),
+            "active_mode": self.active_mode,
+            "frame_w": int(w),
+            "frame_h": int(h),
+            "persons": telemetry_persons,
+        }
+
 
 # ==============================================================================
 # MAIN ENTRYPOINT
@@ -662,8 +761,7 @@ if __name__ == "__main__":
             pipeline.active_mode = "AUTO"
             print(">> Mode Latihan: AUTO DETECTION")
         elif key == ord('r') or key == ord('R'):
-            for p in pipeline.persons.values():
-                p.rep_count = 0
+            pipeline.reset_all_reps()
             print(">> Repetisi di-reset ke 0!")
 
     webcam.release()
