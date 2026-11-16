@@ -44,10 +44,16 @@ Struktur repositori telah dipisahkan secara modular untuk memudahkan ekspansi ke
 ```
 skelio/
 ├── 🌐 apps/
-│   ├── web/                    # Rencana arsitektur Web App (Next.js / FastAPI WebRTC)
-│   └── mobile/                 # Rencana arsitektur Mobile App (Flutter / Android TFLite)
+│   ├── web/                    # Flask Web Dashboard, Video Upload, Metronome, PDF Export & PWA
+│   │   ├── app.py              # Server utama Flask (http://localhost:5000)
+│   │   ├── templates/          # Antarmuka dashboard (index.html)
+│   │   └── static/             # PWA Manifest, Service Worker, Icon
+│   └── mobile/                 # Mobile PWA & Capacitor Android Project
+│       ├── capacitor.config.json
+│       ├── package.json
+│       └── src/index.html      # Touch-first Mobile UI
 │
-├── ⚙️ core/                    # Engine Utama SKELIO
+├── ⚙️ core/                    # Engine & Skrip Eksperimen SKELIO
 │   ├── biomechanical_pipeline.py  # Pipeline real-time webcam & video evaluator
 │   ├── bytetrack_live.yaml        # Konfigurasi kustom ByteTrack
 │   ├── batch_training.py          # Skrip pelatihan model YOLOv11 kalistenik
@@ -58,8 +64,9 @@ skelio/
 │   └── yolo11_biomechanics_benchmark.csv # Data benchmark empiris
 │
 ├── 📦 models/                  # Bobot model AI terlatih
-│   ├── best_calisthenics_pose.pt  # Model terlatih kalistenik (19.9 MB)
-│   └── yolo11n-pose.pt            # Bobot model COCO baseline
+│   └── best_calisthenics_pose.pt  # Model terlatih kalistenik (19.9 MB)
+│
+├── 🎯 yolo11n-pose/ & yolo11s-pose/ # Hasil training & evaluasi model pose (best.pt, last.pt, grafik)
 │
 ├── 📊 dataset/                 # Dataset citra & anotasi Roboflow
 │   └── exercise.v4-up-exercise.yolov8/ (train, valid, test, data.yaml)
@@ -68,14 +75,18 @@ skelio/
 │   ├── EDA.ipynb               # Exploratory Data Analysis
 │   └── keypoint_detection_homography_mapping.ipynb # Pemetaan homografi
 │
-├── 📚 docs/                    # Berkas naskah akademik & presentasi
+├── 📚 docs/                    # Berkas naskah akademik & panduan
 │   ├── KELOMPOK 11 BIG DATA .pdf  # Naskah Proposal Penelitian Resmi
 │   ├── PPT KELOMPOK 11 BIG DATA.pptx # Slide presentasi Sempro
 │   ├── PANDUAN_PRESENTASI_SEMPRO.md  # Naskah pembicara & panduan Q&A
-│   ├── PANDUAN_TUTORIAL_SKELIO.md    # Buku panduan lengkap sistem
-│   └── assets_sempro/          # Grafik high-res dan rekaman video demo
+│   └── PANDUAN_TUTORIAL_SKELIO.md    # Buku panduan lengkap sistem
 │
-├── 🚀 run_skelio.bat           # Launcher 1-klik LIVE Webcam
+├── 🎬 assets_sempro/           # Grafik high-res dan rekaman video demo
+├── 🧠 biomechanical_pipeline.py# Entry-point utama pipeline OpenCV
+├── 🏋️ yolo11n-pose.pt          # Bobot model YOLOv11n-Pose baseline (root)
+├── 🚀 run_skelio.bat           # Launcher 1-klik LIVE Webcam (OpenCV)
+├── 🌐 run_skelio_app.bat       # Launcher 1-klik Web Dashboard (Flask)
+├── 🖥️ run_skelio_desktop_app.bat # Launcher 1-klik Standalone Desktop Window
 ├── 🎬 run_demo_video_pushup.bat# Launcher 1-klik Demo Video Push-Up
 ├── 🏋️ run_demo_video_squat.bat # Launcher 1-klik Demo Video Squat
 └── requirements.txt            # Dependensi pustaka Python
@@ -104,18 +115,29 @@ Gunakan **Python 3.10** atau **Python 3.11** (64-bit Windows):
 git clone https://github.com/Drappy-cat/skelio.git
 cd skelio
 
-# Instal dependensi
+# Instal dependensi utama & Flask (untuk Web Dashboard)
 pip install -r requirements.txt
+pip install flask
 ```
 
 ### 2. Menjalankan Sistem SKELIO
-- **Live Webcam:** Dobel klik `run_skelio.bat` atau jalankan:
+- **Web Application Dashboard (Flask — `http://localhost:5000`):**
+  Dobel klik `run_skelio_app.bat` atau jalankan:
   ```bash
-  python core/biomechanical_pipeline.py
+  py -3.11 apps/web/app.py
+  ```
+- **Native Desktop App (Jendela Mandiri Edge/Chrome):**
+  Dobel klik `run_skelio_desktop_app.bat`
+- **Live Webcam (OpenCV Pipeline):**
+  Dobel klik `run_skelio.bat` atau jalankan:
+  ```bash
+  py -3.11 biomechanical_pipeline.py
   ```
 - **Demo Video Offline (Tanpa Perlu Gerakan Fisik di Depan Penguji):**
-  - Push-Up: Dobel klik `run_demo_video_pushup.bat`
-  - Squat: Dobel klik `run_demo_video_squat.bat`
+  - Push-Up: Dobel klik `run_demo_video_pushup.bat` (atau `py -3.11 biomechanical_pipeline.py "assets_sempro/raw_push-up_sample.mp4"`)
+  - Squat: Dobel klik `run_demo_video_squat.bat` (atau `py -3.11 biomechanical_pipeline.py "assets_sempro/raw_squat_sample.mp4"`)
+
+> **Catatan:** Jika di PC hanya terpasang Python 3.10 (bukan 3.11), ganti `py -3.11` dengan `py -3.10`.
 
 ### 🎮 Kontrol Keyboard Interaktif:
 - `1` : Mode Push-Up (Sudut siku & kelurusan tulang punggung).
