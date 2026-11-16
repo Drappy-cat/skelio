@@ -62,3 +62,18 @@ apps/web/uploads/*
 Thumbs.db
 ehthumbs.db
 [Dd]esktop.ini
+
+# 6. Local Version Changelog & Release Notes (Semantic Versioning)
+[0-9]*.[0-9]*.[0-9]*.md
+v[0-9]*.[0-9]*.[0-9]*.md
+
+# 7. Bare React Native & Android Gradle Build Artifacts
+apps/mobile-rn/node_modules/
+apps/mobile-rn/android/.gradle/
+apps/mobile-rn/android/.cxx/
+apps/mobile-rn/android/build/
+apps/mobile-rn/android/app/build/
+apps/mobile-rn/android/app/.cxx/
+apps/mobile-rn/android/local.properties
+*.apk
+*.aab
