@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -22,8 +24,10 @@ import { usePoseWebSocket } from './hooks/usePoseWebSocket';
 
 const MODES: ExerciseMode[] = ['PUSH-UP', 'SQUAT', 'SIT-UP', 'AUTO'];
 const DEFAULT_WS_URL = 'ws://192.168.1.31:8000/ws/pose';
-const TARGET_STREAM_WIDTH = 320;
-const JPEG_QUALITY = 60;
+const TARGET_STREAM_WIDTH = 256;
+const JPEG_QUALITY = 50;
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(() => resolve(), ms));
 
 export function App() {
   return (
@@ -35,6 +39,9 @@ export function App() {
 }
 
 function SkelioNativeScreen() {
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+
   const { hasPermission, requestPermission } = useCameraPermission();
   const [cameraPosition, setCameraPosition] = useState<'front' | 'back'>('front');
   const device = useCameraDevice(cameraPosition);
@@ -42,6 +49,7 @@ function SkelioNativeScreen() {
   const [wsUrl, setWsUrl] = useState<string>(DEFAULT_WS_URL);
   const [draftUrl, setDraftUrl] = useState<string>(DEFAULT_WS_URL);
   const [serverModalVisible, setServerModalVisible] = useState<boolean>(false);
+  const [panelVisible, setPanelVisible] = useState<boolean>(true);
   const [previewReady, setPreviewReady] = useState<boolean>(false);
   const [viewport, setViewport] = useState<{ width: number; height: number }>({
     width: 0,
@@ -56,8 +64,7 @@ function SkelioNativeScreen() {
     fps,
     rttMs,
     inferMs,
-    canSendFrame,
-    sendFrame,
+    queueOrSendFrame,
     setMode,
     resetReps,
   } = usePoseWebSocket(wsUrl);
@@ -68,58 +75,61 @@ function SkelioNativeScreen() {
     }
   }, [hasPermission, requestPermission]);
 
-  // Split-Pipeline Capture Loop:
-  // Hanya mengambil snapshot saat WebSocket terhubung dan slot inferensi (Queue=1) kosong.
+  // Pipelined Capture Loop:
+  // Capture + resize + encode JPEG frame berikutnya di HP berjalan paralel dengan inferensi server.
   useEffect(() => {
     if (!hasPermission || !device || !previewReady || status !== 'connected') {
       return;
     }
 
     let cancelled = false;
-    let capturing = false;
 
-    const tick = async () => {
-      if (cancelled || capturing || !cameraRef.current || !canSendFrame()) {
-        return;
-      }
-
-      capturing = true;
-      let rawImage: NitroImage | null = null;
-      let resizedImage: NitroImage | null = null;
-
-      try {
-        rawImage = await cameraRef.current.takeSnapshot();
-        if (cancelled) {
-          return;
+    const runPipeline = async () => {
+      while (!cancelled) {
+        if (!cameraRef.current) {
+          await sleep(16);
+          continue;
         }
 
-        const scale = TARGET_STREAM_WIDTH / Math.max(1, rawImage.width);
-        const targetH = Math.max(180, Math.round(rawImage.height * scale));
-        resizedImage = await rawImage.resizeAsync(TARGET_STREAM_WIDTH, targetH);
-        const encoded = await resizedImage.toEncodedImageDataAsync('jpg', JPEG_QUALITY);
+        let rawImage: NitroImage | null = null;
+        let resizedImage: NitroImage | null = null;
 
-        if (!cancelled) {
-          sendFrame(encoded.buffer);
+        try {
+          rawImage = await cameraRef.current.takeSnapshot();
+          if (cancelled) {
+            break;
+          }
+
+          const scale = TARGET_STREAM_WIDTH / Math.max(1, rawImage.width);
+          const targetH = Math.max(144, Math.round(rawImage.height * scale));
+          resizedImage = await rawImage.resizeAsync(TARGET_STREAM_WIDTH, targetH);
+          const encoded = await resizedImage.toEncodedImageDataAsync('jpg', JPEG_QUALITY);
+
+          if (!cancelled) {
+            queueOrSendFrame(encoded.buffer);
+          }
+        } catch {
+          // Preview sementara belum siap atau camera sedang beralih posisi
+          await sleep(16);
+        } finally {
+          try {
+            resizedImage?.dispose();
+          } catch {}
+          try {
+            rawImage?.dispose();
+          } catch {}
         }
-      } catch {
-        // Preview sementara belum siap atau camera sedang beralih posisi
-      } finally {
-        try {
-          resizedImage?.dispose();
-        } catch {}
-        try {
-          rawImage?.dispose();
-        } catch {}
-        capturing = false;
+
+        // Beri jeda singkat agar UI/gesture thread tetap responsif
+        await sleep(4);
       }
     };
 
-    const timer = setInterval(tick, 33);
+    runPipeline();
     return () => {
       cancelled = true;
-      clearInterval(timer);
     };
-  }, [hasPermission, device, previewReady, status, canSendFrame, sendFrame]);
+  }, [hasPermission, device, previewReady, status, queueOrSendFrame]);
 
   const primary = persons[0];
   const depthPct = primary ? Math.min(100, Math.max(0, primary.depth_pct)) : 0;
@@ -129,30 +139,26 @@ function SkelioNativeScreen() {
   const postureFault =
     postureText.includes('TURUN') || postureText.includes('BUNGKUK');
 
-  return (
-    <SafeAreaView style={styles.root}>
-      {/* Top Bar */}
-      <View style={styles.topBar}>
-        <View>
-          <Text style={styles.brandTitle}>SKELIO NATIVE v3.0</Text>
-          <View style={styles.connRow}>
-            <View style={[styles.dot, { backgroundColor: statusColor }]} />
-            <Text style={styles.connLabel}>
-              {status === 'connected'
-                ? `LIVE • RTT ${rttMs}ms (AI ${inferMs}ms) • ${fps.toFixed(1)} FPS`
-                : status === 'connecting'
-                ? 'Menghubungkan ke FastAPI...'
-                : 'Terputus (Cek IP Server)'}
-            </Text>
-          </View>
-        </View>
+  const sidePanelWidth = Math.min(245, Math.max(198, Math.round(width * 0.27)));
 
-        <View style={styles.topActions}>
+  const renderControlPanel = () => (
+    <View
+      style={[
+        styles.controlPanel,
+        isLandscape
+          ? [styles.controlPanelLandscape, { width: sidePanelWidth }]
+          : styles.controlPanelPortrait,
+      ]}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.panelScrollContent}>
+        {/* Quick Actions: Camera & Server IP */}
+        <View style={styles.utilityRow}>
           <Pressable
             onPress={() => setCameraPosition(prev => (prev === 'front' ? 'back' : 'front'))}
-            style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>
-              {cameraPosition === 'front' ? 'Kamera Depan' : 'Kamera Blkg'}
+            style={styles.utilityBtn}>
+            <Text style={styles.utilityBtnText}>
+              {cameraPosition === 'front' ? 'Kamera: Depan' : 'Kamera: Blkg'}
             </Text>
           </Pressable>
           <Pressable
@@ -160,107 +166,54 @@ function SkelioNativeScreen() {
               setDraftUrl(wsUrl);
               setServerModalVisible(true);
             }}
-            style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>Server IP</Text>
+            style={styles.utilityBtn}>
+            <Text style={styles.utilityBtnText}>Server IP</Text>
           </Pressable>
         </View>
-      </View>
 
-      {/* Camera Viewport + SVG Skeleton Overlay */}
-      <View
-        style={styles.cameraStage}
-        onLayout={e => {
-          const { width, height } = e.nativeEvent.layout;
-          setViewport({ width, height });
-        }}>
-        {!hasPermission ? (
-          <View style={styles.permissionCard}>
-            <Text style={styles.permissionTitle}>Izin Kamera Diperlukan</Text>
-            <Text style={styles.permissionSub}>
-              SKELIO membutuhkan akses kamera untuk evaluasi postur biomekanika real-time.
-            </Text>
-            <Pressable onPress={requestPermission} style={styles.primaryBtn}>
-              <Text style={styles.primaryBtnText}>Izinkan Kamera</Text>
-            </Pressable>
-          </View>
-        ) : !device ? (
-          <View style={styles.permissionCard}>
-            <Text style={styles.permissionTitle}>Kamera Tidak Ditemukan</Text>
-          </View>
-        ) : (
-          <>
-            <Camera
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              device={device}
-              isActive={true}
-              implementationMode="compatible"
-              resizeMode="cover"
-              onPreviewStarted={() => setPreviewReady(true)}
-              onPreviewStopped={() => setPreviewReady(false)}
-            />
-            <SkeletonOverlay
-              width={viewport.width}
-              height={viewport.height}
-              persons={persons}
-            />
-          </>
-        )}
-
-        {/* Right-edge Vertical Depth Gauge */}
-        <View style={styles.depthTrack}>
-          <View
-            style={[
-              styles.depthFill,
-              {
-                height: `${depthPct}%`,
-                backgroundColor:
-                  depthPct >= 70 ? '#22c55e' : depthPct >= 35 ? '#f59e0b' : '#ef4444',
-              },
-            ]}
-          />
-        </View>
-
-        {/* Top-left Mode Badge */}
-        <View style={styles.modeBadge}>
-          <Text style={styles.modeBadgeText}>{activeMode}</Text>
-          <Text style={styles.stageBadgeText}>{primary?.stage ?? 'IDLE'}</Text>
-        </View>
-      </View>
-
-      {/* Telemetry & Controls */}
-      <View style={styles.bottomPanel}>
+        {/* Live Telemetry Cards */}
         <View style={styles.metricsRow}>
           <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>REPETISI</Text>
-            <Text style={styles.metricValue}>{primary?.rep_count ?? 0}</Text>
-            <Text style={styles.metricSub}>Clean: {primary?.clean_reps ?? 0}</Text>
+            <Text style={styles.metricLabel}>REPS</Text>
+            <Text style={[styles.metricValue, isLandscape && styles.metricValueCompact]}>
+              {primary?.rep_count ?? 0}
+            </Text>
+            <Text style={styles.metricSub}>Clean {primary?.clean_reps ?? 0}</Text>
           </View>
           <View style={styles.metricCard}>
             <Text style={styles.metricLabel}>SUDUT</Text>
-            <Text style={[styles.metricValue, { color: '#22d3ee' }]}>
+            <Text
+              style={[
+                styles.metricValue,
+                isLandscape && styles.metricValueCompact,
+                { color: '#22d3ee' },
+              ]}>
               {Math.round(primary?.primary_angle ?? 0)}°
             </Text>
-            <Text style={styles.metricSub}>
-              Postur: {Math.round(primary?.posture_angle ?? 0)}°
-            </Text>
+            <Text style={styles.metricSub}>Post {Math.round(primary?.posture_angle ?? 0)}°</Text>
           </View>
           <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>KEDALAMAN</Text>
-            <Text style={[styles.metricValue, { color: '#fbbf24' }]}>
+            <Text style={styles.metricLabel}>DEPTH</Text>
+            <Text
+              style={[
+                styles.metricValue,
+                isLandscape && styles.metricValueCompact,
+                { color: '#fbbf24' },
+              ]}>
               {Math.round(depthPct)}%
             </Text>
-            <Text style={styles.metricSub}>Target 70%+</Text>
+            <Text style={styles.metricSub}>Target 70%</Text>
           </View>
         </View>
 
+        {/* Posture Callout */}
         <View
           style={[
             styles.postureBanner,
             { borderColor: postureFault ? '#ef4444' : '#1e293b' },
           ]}>
           <Text
-            numberOfLines={1}
+            numberOfLines={2}
             style={[
               styles.postureText,
               { color: postureFault ? '#f87171' : '#34d399' },
@@ -269,24 +222,138 @@ function SkelioNativeScreen() {
           </Text>
         </View>
 
-        <View style={styles.modeRow}>
+        {/* Adaptive Mode Buttons (2x2 Grid in Landscape, Single Row in Portrait) */}
+        <View style={isLandscape ? styles.modeGridLandscape : styles.modeRowPortrait}>
           {MODES.map(mode => {
             const active = activeMode === mode;
             return (
               <Pressable
                 key={mode}
                 onPress={() => setMode(mode)}
-                style={[styles.modePill, active && styles.modePillActive]}>
+                style={[
+                  styles.modePill,
+                  isLandscape ? styles.modePillGrid : styles.modePillRow,
+                  active && styles.modePillActive,
+                ]}>
                 <Text style={[styles.modePillText, active && styles.modePillTextActive]}>
                   {mode}
                 </Text>
               </Pressable>
             );
           })}
-          <Pressable onPress={resetReps} style={styles.resetBtn}>
-            <Text style={styles.resetBtnText}>Reset</Text>
+          <Pressable
+            onPress={resetReps}
+            style={[styles.resetBtn, isLandscape && styles.resetBtnFull]}>
+            <Text style={styles.resetBtnText}>Reset Repetisi</Text>
           </Pressable>
         </View>
+      </ScrollView>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.root}>
+      <View
+        style={[
+          styles.mainContainer,
+          { flexDirection: isLandscape ? 'row' : 'column' },
+        ]}>
+        {/* Camera Viewport (Mengambil area utama seluas mungkin) */}
+        <View
+          style={styles.cameraStage}
+          onLayout={e => {
+            const { width: vw, height: vh } = e.nativeEvent.layout;
+            setViewport({ width: vw, height: vh });
+          }}>
+          {!hasPermission ? (
+            <View style={styles.permissionCard}>
+              <Text style={styles.permissionTitle}>Izin Kamera Diperlukan</Text>
+              <Text style={styles.permissionSub}>
+                SKELIO membutuhkan akses kamera untuk evaluasi postur biomekanika real-time.
+              </Text>
+              <Pressable onPress={requestPermission} style={styles.primaryBtn}>
+                <Text style={styles.primaryBtnText}>Izinkan Kamera</Text>
+              </Pressable>
+            </View>
+          ) : !device ? (
+            <View style={styles.permissionCard}>
+              <Text style={styles.permissionTitle}>Kamera Tidak Ditemukan</Text>
+            </View>
+          ) : (
+            <>
+              <Camera
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                device={device}
+                isActive={true}
+                implementationMode="compatible"
+                resizeMode="cover"
+                onPreviewStarted={() => setPreviewReady(true)}
+                onPreviewStopped={() => setPreviewReady(false)}
+              />
+              <SkeletonOverlay
+                width={viewport.width}
+                height={viewport.height}
+                persons={persons}
+              />
+            </>
+          )}
+
+          {/* Floating Top-Left HUD: Connection + Active Mode */}
+          <View style={styles.floatingTopLeft}>
+            <View style={styles.connPill}>
+              <View style={[styles.dot, { backgroundColor: statusColor }]} />
+              <Text style={styles.connPillText}>
+                {status === 'connected'
+                  ? `LIVE • ${rttMs}ms (AI ${inferMs}ms) • ${fps.toFixed(1)} FPS`
+                  : status === 'connecting'
+                  ? 'Menghubungkan...'
+                  : 'Terputus'}
+              </Text>
+            </View>
+            <View style={styles.modeBadge}>
+              <Text style={styles.modeBadgeText}>{activeMode}</Text>
+              <Text style={styles.stageBadgeText}>{primary?.stage ?? 'IDLE'}</Text>
+            </View>
+          </View>
+
+          {/* Floating Top-Right Toggle: Hide / Show Control Panel */}
+          <Pressable
+            onPress={() => setPanelVisible(prev => !prev)}
+            style={styles.togglePanelBtn}>
+            <Text style={styles.togglePanelBtnText}>
+              {panelVisible ? 'Sembunyikan' : 'Menu Kontrol'}
+            </Text>
+          </Pressable>
+
+          {/* Mini Floating Metrics when Panel is Hidden (Fullscreen Mode) */}
+          {!panelVisible && (
+            <View style={styles.miniHudBottomLeft}>
+              <Text style={styles.miniHudText}>
+                {`REPS: ${primary?.rep_count ?? 0}  •  SUDUT: ${Math.round(
+                  primary?.primary_angle ?? 0,
+                )}°  •  ${postureText}`}
+              </Text>
+            </View>
+          )}
+
+          {/* Right-edge Vertical Depth Gauge */}
+          <View style={styles.depthTrack}>
+            <View
+              style={[
+                styles.depthFill,
+                {
+                  height: `${depthPct}%`,
+                  backgroundColor:
+                    depthPct >= 70 ? '#22c55e' : depthPct >= 35 ? '#f59e0b' : '#ef4444',
+                },
+              ]}
+            />
+          </View>
+        </View>
+
+        {/* Adaptive Side / Bottom Control Panel */}
+        {panelVisible && renderControlPanel()}
       </View>
 
       {/* Server WebSocket Config Modal */}
@@ -338,35 +405,12 @@ function SkelioNativeScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0b0f19' },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: '#0f172a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-  },
-  brandTitle: { color: '#22d3ee', fontSize: 15, fontWeight: '800', letterSpacing: 0.4 },
-  connRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  connLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'monospace' },
-  topActions: { flexDirection: 'row', gap: 6 },
-  iconBtn: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  iconBtnText: { color: '#e2e8f0', fontSize: 11, fontWeight: '600' },
+  mainContainer: { flex: 1 },
 
   cameraStage: {
     flex: 1,
-    margin: 10,
-    borderRadius: 18,
+    margin: 6,
+    borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#020617',
     borderWidth: 1,
@@ -385,14 +429,78 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: '#082f49', fontWeight: '800', fontSize: 13 },
 
+  floatingTopLeft: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: '72%',
+  },
+  connPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(51, 65, 85, 0.8)',
+  },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  connPillText: { color: '#e2e8f0', fontSize: 10, fontFamily: 'monospace', fontWeight: '600' },
+  modeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(51, 65, 85, 0.8)',
+  },
+  modeBadgeText: { color: '#22d3ee', fontSize: 11, fontWeight: '800' },
+  stageBadgeText: { color: '#f8fafc', fontSize: 10, fontWeight: '700' },
+
+  togglePanelBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  togglePanelBtnText: { color: '#38bdf8', fontSize: 11, fontWeight: '700' },
+
+  miniHudBottomLeft: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 34,
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  miniHudText: { color: '#f8fafc', fontSize: 12, fontWeight: '700' },
+
   depthTrack: {
     position: 'absolute',
     right: 10,
-    top: 16,
-    bottom: 16,
-    width: 12,
-    borderRadius: 6,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    top: 48,
+    bottom: 14,
+    width: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
     borderWidth: 1,
     borderColor: '#334155',
     justifyContent: 'flex-end',
@@ -400,70 +508,101 @@ const styles = StyleSheet.create({
   },
   depthFill: { width: '100%', borderRadius: 4 },
 
-  modeBadge: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+  controlPanel: {
+    backgroundColor: '#0f172a',
+    borderColor: '#1e293b',
+  },
+  controlPanelLandscape: {
+    height: '100%',
+    borderLeftWidth: 1,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 8,
+  },
+  controlPanelPortrait: {
+    width: '100%',
+    borderTopWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  panelScrollContent: {
+    gap: 8,
+  },
+
+  utilityRow: { flexDirection: 'row', gap: 6 },
+  utilityBtn: {
+    flex: 1,
+    backgroundColor: '#1e293b',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#334155',
+    alignItems: 'center',
   },
-  modeBadgeText: { color: '#22d3ee', fontSize: 12, fontWeight: '800' },
-  stageBadgeText: { color: '#f8fafc', fontSize: 11, fontWeight: '700' },
+  utilityBtnText: { color: '#e2e8f0', fontSize: 11, fontWeight: '700' },
 
-  bottomPanel: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    gap: 8,
-  },
-  metricsRow: { flexDirection: 'row', gap: 8 },
+  metricsRow: { flexDirection: 'row', gap: 6 },
   metricCard: {
     flex: 1,
     backgroundColor: '#111827',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#1e293b',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
     alignItems: 'center',
   },
-  metricLabel: { color: '#94a3b8', fontSize: 10, fontWeight: '700' },
-  metricValue: { color: '#ffffff', fontSize: 26, fontWeight: '800', marginVertical: 2 },
-  metricSub: { color: '#64748b', fontSize: 10 },
+  metricLabel: { color: '#94a3b8', fontSize: 9, fontWeight: '700' },
+  metricValue: { color: '#ffffff', fontSize: 22, fontWeight: '800', marginVertical: 1 },
+  metricValueCompact: { fontSize: 18 },
+  metricSub: { color: '#64748b', fontSize: 9 },
 
   postureBanner: {
     backgroundColor: '#111827',
     borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     alignItems: 'center',
   },
-  postureText: { fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
+  postureText: { fontSize: 11, fontWeight: '800', textAlign: 'center' },
 
-  modeRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  modeGridLandscape: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  modeRowPortrait: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+  },
   modePill: {
-    flex: 1,
-    paddingVertical: 9,
-    borderRadius: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
     backgroundColor: '#1e293b',
     alignItems: 'center',
+  },
+  modePillGrid: {
+    width: '48%',
+  },
+  modePillRow: {
+    flex: 1,
   },
   modePillActive: { backgroundColor: '#06b6d4' },
   modePillText: { color: '#cbd5e1', fontSize: 11, fontWeight: '700' },
   modePillTextActive: { color: '#082f49', fontWeight: '800' },
+
   resetBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
     backgroundColor: '#334155',
     alignItems: 'center',
+  },
+  resetBtnFull: {
+    width: '100%',
+    marginTop: 2,
   },
   resetBtnText: { color: '#f8fafc', fontSize: 11, fontWeight: '700' },
 

@@ -28,11 +28,12 @@ if ROOT_DIR not in sys.path:
 from core.biomechanical_pipeline import BiomechanicalPipeline
 
 VALID_MODES = {"PUSH-UP", "SQUAT", "SIT-UP", "AUTO"}
-DEFAULT_IMGSZ = int(os.environ.get("SKELIO_IMGSZ", "320"))
+DEFAULT_IMGSZ = int(os.environ.get("SKELIO_IMGSZ", "256"))
+MODEL_TIER = os.environ.get("SKELIO_MODEL", "small").strip().lower()
 
 app = FastAPI(
     title="SKELIO Split-Pipeline API",
-    version="3.0.0",
+    version="3.1.0",
     description="Low-latency pose telemetry WebSocket backend for SKELIO Native Android",
 )
 
@@ -61,9 +62,21 @@ def get_pipeline() -> BiomechanicalPipeline:
     """Menginisialisasi dan mengembalikan instance tunggal BiomechanicalPipeline."""
     global _pipeline
     if _pipeline is None:
-        model_path = os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt")
-        if not os.path.exists(model_path):
-            model_path = os.path.join(ROOT_DIR, "yolo11n-pose.pt")
+        candidates = (
+            [
+                os.path.join(ROOT_DIR, "models", "best_calisthenics_nano.onnx"),
+                os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.onnx"),
+                os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+                os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
+            ]
+            if MODEL_TIER == "nano"
+            else [
+                os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.onnx"),
+                os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+                os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
+            ]
+        )
+        model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
         _pipeline = BiomechanicalPipeline(pose_model_path=model_path, imgsz=DEFAULT_IMGSZ)
     return _pipeline
 
@@ -115,7 +128,7 @@ def warmup_pipeline() -> None:
     """Preload model saat server start agar koneksi WebSocket pertama tidak terkena cold-start."""
     with _pipeline_lock:
         pipe = get_pipeline()
-        dummy = np.zeros((320, 320, 3), dtype=np.uint8)
+        dummy = np.zeros((DEFAULT_IMGSZ, DEFAULT_IMGSZ, 3), dtype=np.uint8)
         pipe.process_frame_telemetry(dummy)
 
 
@@ -125,7 +138,7 @@ def health() -> Dict[str, Any]:
         pipe = get_pipeline()
         return {
             "status": "online",
-            "version": "3.0.0",
+            "version": "3.1.0",
             "device": str(pipe.device),
             "imgsz": pipe.imgsz,
             "active_mode": pipe.active_mode,

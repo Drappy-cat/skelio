@@ -19,6 +19,7 @@ interface UsePoseWebSocketResult {
   inferMs: number;
   canSendFrame: () => boolean;
   sendFrame: (jpegBuffer: ArrayBuffer) => boolean;
+  queueOrSendFrame: (jpegBuffer: ArrayBuffer) => boolean;
   setMode: (mode: ExerciseMode) => void;
   resetReps: () => void;
 }
@@ -35,6 +36,7 @@ export function usePoseWebSocket(wsUrl: string): UsePoseWebSocketResult {
 
   const wsRef = useRef<WebSocket | null>(null);
   const inFlightRef = useRef<boolean>(false);
+  const pendingFrameRef = useRef<ArrayBuffer | null>(null);
   const lastSendTsRef = useRef<number>(0);
   const filtersRef = useRef<Map<number, OneEuroKeypointFilter>>(new Map());
 
@@ -103,11 +105,22 @@ export function usePoseWebSocket(wsUrl: string): UsePoseWebSocketResult {
             setActiveMode(msg.active_mode);
           } else if (msg.type === 'telemetry') {
             const packet = msg as TelemetryPacket;
-            inFlightRef.current = false;
             const now = Date.now();
             if (lastSendTsRef.current > 0) {
               setRttMs(Math.max(0, now - lastSendTsRef.current));
             }
+
+            // Pipelining: segera kirim frame pending tanpa menunggu siklus capture baru
+            const nextFrame = pendingFrameRef.current;
+            if (nextFrame && ws.readyState === WebSocket.OPEN) {
+              pendingFrameRef.current = null;
+              inFlightRef.current = true;
+              lastSendTsRef.current = now;
+              ws.send(nextFrame);
+            } else {
+              inFlightRef.current = false;
+            }
+
             if (typeof packet.infer_ms === 'number') {
               setInferMs(Math.round(packet.infer_ms));
             }
@@ -124,10 +137,12 @@ export function usePoseWebSocket(wsUrl: string): UsePoseWebSocketResult {
 
       ws.onerror = () => {
         inFlightRef.current = false;
+        pendingFrameRef.current = null;
       };
 
       ws.onclose = () => {
         inFlightRef.current = false;
+        pendingFrameRef.current = null;
         if (!closedByUser) {
           setStatus('disconnected');
           reconnectTimer = setTimeout(connect, 1800);
@@ -177,6 +192,25 @@ export function usePoseWebSocket(wsUrl: string): UsePoseWebSocketResult {
     [canSendFrame],
   );
 
+  const queueOrSendFrame = useCallback(
+    (jpegBuffer: ArrayBuffer): boolean => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+      if (canSendFrame()) {
+        pendingFrameRef.current = null;
+        inFlightRef.current = true;
+        lastSendTsRef.current = Date.now();
+        ws.send(jpegBuffer);
+        return true;
+      }
+      pendingFrameRef.current = jpegBuffer;
+      return true;
+    },
+    [canSendFrame],
+  );
+
   const setMode = useCallback((mode: ExerciseMode) => {
     setActiveMode(mode);
     const ws = wsRef.current;
@@ -201,6 +235,7 @@ export function usePoseWebSocket(wsUrl: string): UsePoseWebSocketResult {
     inferMs,
     canSendFrame,
     sendFrame,
+    queueOrSendFrame,
     setMode,
     resetReps,
   };

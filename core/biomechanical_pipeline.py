@@ -235,7 +235,7 @@ class BiomechanicalPipeline:
             target_model = "yolo11n-pose.pt"
             
         print(f"📦 SKELIO: Memuat Model Pose dari: {target_model} (Device: {self.device})")
-        self.detector = YOLO(target_model)
+        self.detector = YOLO(target_model, task='pose')
         
         default_yaml = os.path.join(base_dir, "bytetrack_live.yaml")
         if not os.path.exists(default_yaml):
