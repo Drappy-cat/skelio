@@ -21,7 +21,9 @@ def train_yolo_batch():
     
     # Path ke file data.yaml pada dataset Roboflow
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_yaml = os.path.join(base_dir, "exercise.v4-up-exercise.yolov8", "data.yaml")
+    dataset_yaml_nested = os.path.join(base_dir, "dataset", "exercise.v4-up-exercise.yolov8", "data.yaml")
+    dataset_yaml_flat = os.path.join(base_dir, "exercise.v4-up-exercise.yolov8", "data.yaml")
+    data_yaml = dataset_yaml_nested if os.path.exists(dataset_yaml_nested) else dataset_yaml_flat
     epochs = 100 
     imgsz = 640
     device = 0 
@@ -53,7 +55,7 @@ def train_yolo_batch():
     mixup = 0.15 # Mixup 15% untuk pencampuran antar gambar
     erasing = 0.2 # Random erasing 20%
     
-    output_base_dir = "models/trained_weights"
+    output_base_dir = os.path.join(base_dir, "models", "trained_weights")
     os.makedirs(output_base_dir, exist_ok=True)
 
     # Cek ketersediaan CUDA GPU

@@ -217,22 +217,18 @@ class BiomechanicalPipeline:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         root_dir = os.path.dirname(base_dir) if os.path.basename(base_dir) == 'core' else base_dir
         
-        default_model = os.path.join(base_dir, "yolo11n-pose.pt")
-        if not os.path.exists(default_model):
-            default_model = os.path.join(root_dir, "yolo11n-pose.pt")
-            
-        trained_model = os.path.join(base_dir, "models", "best_calisthenics_pose.pt")
-        if not os.path.exists(trained_model):
-            trained_model = os.path.join(root_dir, "models", "best_calisthenics_pose.pt")
-        
+        candidates = [
+            os.path.join(base_dir, "models", "best_calisthenics_pose.pt"),
+            os.path.join(root_dir, "models", "best_calisthenics_pose.pt"),
+            os.path.join(root_dir, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+            r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
+            os.path.join(base_dir, "yolo11n-pose.pt"),
+            os.path.join(root_dir, "yolo11n-pose.pt"),
+        ]
         if pose_model_path and os.path.exists(pose_model_path):
             target_model = pose_model_path
-        elif os.path.exists(trained_model):
-            target_model = trained_model
-        elif os.path.exists(default_model):
-            target_model = default_model
         else:
-            target_model = "yolo11n-pose.pt"
+            target_model = next((p for p in candidates if os.path.exists(p)), "yolo11n-pose.pt")
             
         print(f"📦 SKELIO: Memuat Model Pose dari: {target_model} (Device: {self.device})")
         self.detector = YOLO(target_model, task='pose')

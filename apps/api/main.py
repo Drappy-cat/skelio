@@ -29,7 +29,7 @@ from core.biomechanical_pipeline import BiomechanicalPipeline
 
 VALID_MODES = {"PUSH-UP", "SQUAT", "SIT-UP", "AUTO"}
 DEFAULT_IMGSZ = int(os.environ.get("SKELIO_IMGSZ", "256"))
-MODEL_TIER = os.environ.get("SKELIO_MODEL", "small").strip().lower()
+MODEL_TIER = os.environ.get("SKELIO_MODEL", "medium").strip().lower()
 
 app = FastAPI(
     title="SKELIO Split-Pipeline API",
@@ -67,12 +67,16 @@ def get_pipeline() -> BiomechanicalPipeline:
                 os.path.join(ROOT_DIR, "models", "best_calisthenics_nano.onnx"),
                 os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.onnx"),
                 os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+                os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+                r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
                 os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
             ]
             if MODEL_TIER == "nano"
             else [
                 os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.onnx"),
                 os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+                os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+                r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
                 os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
             ]
         )

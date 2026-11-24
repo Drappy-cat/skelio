@@ -11,10 +11,15 @@ def export_to_tensorrt(dynamic=False, half=True, workspace=4, int8=False):
     
     # Mendapatkan path absolut root proyek secara dinamis
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
+    repo_root = os.path.dirname(script_dir)
     
-    # Path model pemenang (misal: Medium)
-    model_path = os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11m-pose', 'weights', 'best.pt')
+    # Path model pemenang (Medium / yolo11m-pose)
+    candidates = [
+        os.path.join(repo_root, 'models', 'best_calisthenics_pose.pt'),
+        os.path.join(repo_root, 'models', 'trained_weights', 'yolo11m-pose', 'weights', 'best.pt'),
+        r'C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt',
+    ]
+    model_path = next((p for p in candidates if os.path.exists(p)), candidates[0])
     
     if not os.path.exists(model_path):
         print(f"❌ Error: Model PyTorch tidak ditemukan di path: {model_path}")

@@ -3,6 +3,8 @@
 # ==============================================================================
 
 # 1. Big Data Files (>100MB blocked by GitHub)
+dataset/
+dataset_hama/
 *.xlsx
 evaluasi_homografi_fitness_3juta.xlsx
 *.tar.gz
@@ -44,6 +46,16 @@ venv.bak/
 
 # 4. Machine Learning Checkpoints & Runs
 runs/
+pose_models/
+hasil_training*/
+models/trained_weights/
+yolo11*-pose/
+yolo11n-pose/
+yolo11s-pose/
+yolo11m-pose/
+yolo11l-pose/
+yolo11x-pose/
+/best_calisthenics_pose.pt
 *.engine
 *.onnx
 epoch*.pt

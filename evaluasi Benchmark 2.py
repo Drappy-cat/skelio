@@ -267,10 +267,17 @@ class BiomechanicalPipeline:
         print(f"[INFO] Akselerasi Perangkat: {device_name}")
 
         # 2. Lokasi Model Pose Detector
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base_dir, "models", "best_calisthenics_pose.pt"),
+            os.path.join(base_dir, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+            r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
+            os.path.join(base_dir, "yolo11n-pose.pt"),
+        ]
         if pose_model_path and os.path.exists(pose_model_path):
             target_path = pose_model_path
         else:
-            target_path = "yolo11n-pose.pt"
+            target_path = next((p for p in candidates if os.path.exists(p)), "yolo11n-pose.pt")
 
         print(f"[INFO] Loading Model Pose Detector dari: {target_path}")
         self.detector = YOLO(target_path)
@@ -329,8 +336,8 @@ class BiomechanicalPipeline:
 
         sh_y = (kpts[sh_l][1] + kpts[sh_r][1]) / 2.0
         sh_x = (kpts[sh_l][0] + kpts[sh_r][0]) / 2.0
-        hip_y = (kpts[11][1] + kpts[12][1]) / 2.0
-        hip_x = (kpts[11][0] + kpts[12][0]) / 2.0
+        hip_y = (kpts[hip_l][1] + kpts[hip_r][1]) / 2.0
+        hip_x = (kpts[hip_l][0] + kpts[hip_r][0]) / 2.0
         kne_y = (kpts[kne_l][1] + kpts[kne_r][1]) / 2.0
         ank_y = (kpts[ank_l][1] + kpts[ank_r][1]) / 2.0
         ank_x = (kpts[ank_l][0] + kpts[ank_r][0]) / 2.0
@@ -992,6 +999,10 @@ def main():
 
     if GUNAKAN_CUSTOM_MODEL:
         custom_candidates = [
+            os.path.join(script_dir, 'models', 'best_calisthenics_pose.pt'),
+            os.path.join(script_dir, 'models', 'trained_weights', 'yolo11m-pose', 'weights', 'best.pt'),
+            r'C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt',
+            os.path.join(script_dir, 'runs', 'pose_models', 'yolo11m-pose', 'weights', 'best.pt'),
             os.path.join(workspace_root, 'data Best PT', 'best.pt'),
             os.path.join(script_dir, 'runs', 'pose_models', 'yolo11s-pose', 'weights', 'best.pt'),
             os.path.join(script_dir, 'runs', 'pose_models', 'yolo11n-pose', 'weights', 'best.pt'),
