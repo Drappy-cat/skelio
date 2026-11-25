@@ -8,7 +8,7 @@ from ultralytics import YOLO
 def run_benchmark(device=0):
     # Mendapatkan path absolut root proyek secara dinamis
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(script_dir))
+    repo_root = os.path.dirname(script_dir)
     
     # Deteksi perangkat GPU/CPU
     target_device = device if (torch.cuda.is_available() and device != 'cpu') else 'cpu'
@@ -16,7 +16,9 @@ def run_benchmark(device=0):
           f"({torch.cuda.get_device_name(0) if target_device != 'cpu' else 'CPU'})")
 
     # Path dataset dan data.yaml
-    dataset_dir = os.path.join(project_root, 'Kodingan', 'exercise.v4-up-exercise.yolov8')
+    dataset_dir = os.path.join(repo_root, 'dataset', 'exercise.v4-up-exercise.yolov8')
+    if not os.path.exists(dataset_dir):
+        dataset_dir = os.path.join(repo_root, 'Kodingan', 'exercise.v4-up-exercise.yolov8')
     data_yaml_path = os.path.join(dataset_dir, 'data.yaml')
     
     # Update data.yaml path secara dinamis agar valid di drive lokal user
@@ -39,14 +41,31 @@ def run_benchmark(device=0):
     else:
         print(f"⚠️ Warning: data.yaml tidak ditemukan di {data_yaml_path}")
 
-    # Definisikan path model relatif ke project_root
+    # Definisikan path model relatif ke repo_root dan folder hasil training terbaru
+    training_runs_dir = r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models"
+
+    def resolve_tier_model(tier_folder, extra_candidates=None):
+        candidates = list(extra_candidates or []) + [
+            os.path.join(training_runs_dir, tier_folder, 'weights', 'best.pt'),
+            os.path.join(repo_root, 'models', 'trained_weights', tier_folder, 'weights', 'best.pt'),
+            os.path.join(repo_root, tier_folder, 'weights', 'best.pt'),
+        ]
+        return next((p for p in candidates if os.path.exists(p)), candidates[0])
+
     models = {
-        'Nano': os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11n-pose-5', 'weights', 'best.pt'),
-        'Small': os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11s-pose', 'weights', 'best.pt'),
-        'Medium': os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11m-pose-3', 'weights', 'best.pt'),
-        'Large': os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11l-pose-3', 'weights', 'best.pt'),
-        'X-Large': os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11x-pose-6', 'weights', 'best.pt'),
-        'TRT Engine (Medium)': os.path.join(project_root, 'runs', 'pose', 'models', 'trained_weights', 'yolo11m-pose', 'weights', 'best.engine')
+        'Nano': resolve_tier_model('yolo11n-pose'),
+        'Small': resolve_tier_model('yolo11s-pose'),
+        'Medium': resolve_tier_model('yolo11m-pose', [os.path.join(repo_root, 'models', 'best_calisthenics_pose.pt')]),
+        'Large': resolve_tier_model('yolo11l-pose'),
+        'X-Large': resolve_tier_model('yolo11x-pose'),
+        'TRT Engine (Medium)': next(
+            (p for p in [
+                os.path.join(training_runs_dir, 'yolo11m-pose', 'weights', 'best.engine'),
+                os.path.join(repo_root, 'models', 'trained_weights', 'yolo11m-pose', 'weights', 'best.engine'),
+                os.path.join(repo_root, 'models', 'best_calisthenics_pose.engine'),
+            ] if os.path.exists(p)),
+            os.path.join(repo_root, 'models', 'trained_weights', 'yolo11m-pose', 'weights', 'best.engine'),
+        ),
     }
     
     results_data = []

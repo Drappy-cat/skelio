@@ -49,9 +49,13 @@ DEMO_VIDEOS = {
 def get_pipeline():
     global pipeline
     if pipeline is None:
-        model_path = os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt")
-        if not os.path.exists(model_path):
-            model_path = os.path.join(ROOT_DIR, "yolo11n-pose.pt")
+        candidates = [
+            os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+            os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+            r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
+            os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
+        ]
+        model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
         pipeline = BiomechanicalPipeline(pose_model_path=model_path)
     return pipeline
 
