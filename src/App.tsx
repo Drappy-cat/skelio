@@ -619,88 +619,345 @@ function Home({ go }: { go: (screen: Screen) => void }) {
   )
 }
 
-function Analyze({ go }: { go: (screen: Screen) => void }) {
+function Analyze({
+  go,
+  onSaveSession,
+}: {
+  go: (screen: Screen) => void
+  onSaveSession: (record: SessionRecord) => void
+}) {
   const [running, setRunning] = useState(false)
   const [exercise, setExercise] = useState('Push-up')
   const { t, language } = useLanguage()
-  const [cameraState, setCameraState] = useState<'intro' | 'requesting' | 'ready' | 'denied'>('intro')
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const [cameraPermission, setCameraPermission] = useState<'prompt' | 'requesting' | 'granted' | 'denied'>('prompt')
+  const [videoSource, setVideoSource] = useState<'webcam' | 'pushup_demo' | 'squat_demo' | 'custom_upload'>('webcam')
+  const [showSkeleton, setShowSkeleton] = useState(true)
+  const [uploadedFileName, setUploadedFileName] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const localVideoRef = useRef<HTMLVideoElement>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
+  
+  // Real-time AI Telemetry dari Backend SKELIO
+  const [telemetry, setTelemetry] = useState({
+    fps: 0,
+    rep_count: 0,
+    clean_reps: 0,
+    bad_reps: 0,
+    depth_pct: 0,
+    stage: 'UP',
+    status: 'Mempersiapkan Model AI...',
+    primary_angle: 0,
+    posture_angle: 0,
+    session_active: false,
+    session_duration: 0,
+  })
 
-  const enableCamera = async () => {
-    setCameraState('requesting')
+  // Meminta izin kamera ke browser
+  const requestCameraAccess = async () => {
+    setCameraPermission('requesting')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 } },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
         audio: false,
       })
-      streamRef.current = stream
-      if (videoRef.current) videoRef.current.srcObject = stream
-      setCameraState('ready')
-    } catch {
-      setCameraState('denied')
+      localStreamRef.current = stream
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+      setCameraPermission('granted')
+      // Beritahu backend untuk menghubungkan capture webcam
+      handleSourceChange('webcam')
+    } catch (err) {
+      console.warn('Izin kamera ditolak atau tidak tersedia:', err)
+      setCameraPermission('denied')
     }
   }
 
   useEffect(() => {
-    return () => streamRef.current?.getTracks().forEach((track) => track.stop())
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop())
+      }
+    }
   }, [])
 
-  useEffect(() => {
-    if (cameraState === 'ready' && videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current
+  // Sinkronisasi Mode Latihan ke Backend AI SKELIO
+  const handleSelectExercise = async (item: string) => {
+    setExercise(item)
+    const backendMode = item === 'Push-up' ? 'PUSH-UP' : item === 'Squat' ? 'SQUAT' : item === 'Sit-up' ? 'SIT-UP' : 'AUTO'
+    try {
+      await fetch('/api/set_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: backendMode }),
+      })
+    } catch (err) {
+      console.warn('Gagal mengubah mode di backend:', err)
     }
-  }, [cameraState])
+  }
+
+  // Ganti Sumber Video (Webcam / Demo Push-up / Demo Squat)
+  const handleSourceChange = async (source: 'webcam' | 'pushup_demo' | 'squat_demo') => {
+    setVideoSource(source)
+    try {
+      await fetch('/api/set_source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source }),
+      })
+    } catch (err) {
+      console.warn('Gagal mengubah source:', err)
+    }
+  }
+
+  // Upload Video Mandiri
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    const formData = new FormData()
+    formData.append('video', file)
+    try {
+      const res = await fetch('/api/upload_video', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (data.success) {
+        setUploadedFileName(file.name)
+        setVideoSource('custom_upload')
+      }
+    } catch (err) {
+      console.error('Gagal upload video:', err)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  // Toggle Mulai / Selesai Analisis Sesi & Simpan ke Riwayat + Grafik
+  const toggleSession = async () => {
+    if (!running) {
+      try {
+        await fetch('/api/session_start', { method: 'POST' })
+      } catch (e) {
+        console.warn(e)
+      }
+      setRunning(true)
+    } else {
+      try {
+        await fetch('/api/session_stop', { method: 'POST' })
+        // Ambil rekapitulasi data sesi dari AI Backend
+        const sumRes = await fetch('/api/session_summary')
+        if (sumRes.ok) {
+          const sumData = await sumRes.json()
+          const now = new Date()
+          const dateStr = `Hari ini, ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+          const iconType = exercise.toLowerCase().replace(/[^a-z]/g, '')
+          
+          const newSessionRecord: SessionRecord = {
+            id: `session-${Date.now()}`,
+            type: exercise,
+            date: dateStr,
+            reps: `${sumData.total_reps || telemetry.rep_count} reps`,
+            repCount: sumData.total_reps || telemetry.rep_count,
+            cleanReps: sumData.clean_reps || telemetry.clean_reps,
+            score: sumData.score || Math.max(60, Math.min(100, Math.round(telemetry.clean_reps * 8 + 60))),
+            duration: sumData.duration_formatted || `${Math.floor(telemetry.session_duration / 60).toString().padStart(2, '0')}:${(telemetry.session_duration % 60).toString().padStart(2, '0')}`,
+            accuracy: sumData.accuracy_pct || 90,
+            avgAngle: telemetry.primary_angle || 85,
+            icon: iconType.includes('push') ? 'pushup' : iconType.includes('squat') ? 'squat' : 'situp',
+            feedback: sumData.recommendations?.[0] || 'Latihan selesai! Postur tubuh dan repetisi telah dicatat ke dalam analitik riwayat.',
+          }
+          
+          onSaveSession(newSessionRecord)
+        }
+      } catch (e) {
+        console.warn(e)
+      }
+      setRunning(false)
+    }
+  }
+
+  // Polling Telemetry Real-time dari Flask Backend
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/telemetry')
+        if (res.ok) {
+          const data = await res.json()
+          const p = data.primary || {}
+          setTelemetry({
+            fps: data.fps || 0,
+            rep_count: p.rep_count || 0,
+            clean_reps: p.clean_reps || 0,
+            bad_reps: p.bad_reps || 0,
+            depth_pct: Math.round(p.depth_pct || 0),
+            stage: p.stage || 'UP',
+            status: p.status || 'Berlatih...',
+            primary_angle: Math.round(p.primary_angle || 0),
+            posture_angle: Math.round(p.posture_angle || 0),
+            session_active: data.session_active || false,
+            session_duration: data.session_duration || 0,
+          })
+          if (data.session_active !== undefined) {
+            setRunning(data.session_active)
+          }
+        }
+      } catch {
+        // Abaikan error jika backend sedang initializing
+      }
+    }, 200)
+
+    return () => clearInterval(timer)
+  }, [])
+
+  const isFormGood = !telemetry.status.includes('BUNGKUK') && !telemetry.status.includes('PINGGUL') && !telemetry.status.includes('DANGKAL')
+
   return (
     <AppLayout current="analyze" go={go} dark>
       <div className="camera-screen">
         <div className="camera-header">
-          <div>
+          <div className="flex items-center gap-2">
             <span>{t('LIVE ANALYSIS')}</span>
-            <i />
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">
+              {telemetry.fps > 0 ? `${telemetry.fps} FPS` : 'CONNECTING'}
+            </span>
           </div>
-          <button aria-label="Pengaturan" onClick={() => go('settings')}><Icon name="settings" /></button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSkeleton(!showSkeleton)}
+              className={`text-[10px] px-2 py-1 rounded font-medium border ${
+                showSkeleton ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+              }`}
+              title="Aktifkan/Nonaktifkan Tampilan Skeleton AI"
+            >
+              Skeleton {showSkeleton ? 'ON' : 'OFF'}
+            </button>
+            <button aria-label="Pengaturan" onClick={() => go('settings')}><Icon name="settings" /></button>
+          </div>
         </div>
-        <div className="camera-view">
-          {cameraState === 'ready' && <video ref={videoRef} autoPlay muted playsInline className="camera-video" />}
+
+        {/* Video Viewport: Live Stream MJPEG dari YOLOv11 Biomechanical Pipeline */}
+        <div className="camera-view relative overflow-hidden bg-black flex items-center justify-center">
+          {/* Video MJPEG Stream dari AI Pipeline */}
+          {showSkeleton ? (
+            <img
+              src="/video_feed"
+              alt="SKELIO Real-time YOLOv11 AI Skeleton Stream"
+              className="camera-video w-full h-full object-cover select-none"
+              onError={(e) => {
+                // Tampilkan pesan jika stream belum terhubung
+                console.warn('Menunggu stream video...')
+              }}
+            />
+          ) : (
+            <div className="text-center p-6 text-slate-400">
+              <Icon name="camera" size={32} />
+              <p className="mt-2 text-xs">Skeleton AI dinonaktifkan</p>
+            </div>
+          )}
+
+          {/* Fallback info jika kamera belum terhubung */}
+          {telemetry.fps === 0 && (
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+              <div className="w-12 h-12 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center mb-3 animate-pulse">
+                <Icon name="camera" size={24} />
+              </div>
+              <b className="text-sm text-white">Menghubungkan Kamera & Model AI...</b>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                Pastikan server backend SKELIO aktif di port 5000.
+              </p>
+              <button
+                onClick={() => handleSourceChange('webcam')}
+                className="mt-4 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold"
+              >
+                Muat Ulang Kamera
+              </button>
+            </div>
+          )}
+
+          {/* Sudut Frame Overlay */}
           <div className="frame-corner top-left" />
           <div className="frame-corner top-right" />
           <div className="frame-corner bottom-left" />
           <div className="frame-corner bottom-right" />
-          {cameraState === 'requesting' ? (
-            <div className="analysis-running">
-              <i />
-              <b>{t('Menyiapkan kamera...')}</b>
-            </div>
-          ) : cameraState === 'denied' ? (
-            <div className="camera-hint error">
-              <Icon name="camera" size={27} />
-              <b>{t('Izin kamera ditolak')}</b>
-              <span>{t('Aktifkan izin kamera melalui pengaturan perangkat untuk memulai analisis.')}</span>
-              <button onClick={enableCamera}>{t('Coba lagi')}</button>
-            </div>
-          ) : cameraState === 'intro' ? (
-            <div className="camera-permission">
-              <span><Icon name="camera" size={25} /></span>
-              <small>{t('AKSES KAMERA')}</small>
-              <h2>{t('Kamera digunakan hanya untuk menganalisis gerakanmu.')}</h2>
-              <p>{t('Video tidak disimpan kecuali kamu mengaktifkan penyimpanan melalui Pengaturan.')}</p>
-              <button onClick={enableCamera}>{t('Izinkan kamera')}</button>
-            </div>
-          ) : running ? (
-            <div className="analysis-running">
-              <i />
-              <b>{language === 'en' ? 'Analyzing movement' : 'Menganalisis gerakan'}</b>
-              <span>{language === 'en' ? 'Keep your entire body inside the frame' : 'Pastikan seluruh tubuh tetap di dalam bingkai'}</span>
-            </div>
-          ) : (
-            <div className="camera-hint">
-              <Icon name="camera" size={27} />
-              <b>{t('Kamera siap')}</b>
-              <span>{t('Seluruh tubuh harus terlihat di dalam bingkai.')}</span>
+
+          {/* HUD Overlay: Realtime Angle & Stage Display */}
+          <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-white/10 text-xs font-mono flex items-center gap-2 z-10 text-white">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            <span>Sudut: <b className="text-cyan-300">{telemetry.primary_angle}°</b></span>
+            <span className="text-slate-500">|</span>
+            <span>Stage: <b className="text-emerald-400">{telemetry.stage}</b></span>
+          </div>
+
+          {telemetry.session_duration > 0 && (
+            <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-white/10 text-xs font-mono text-emerald-400 z-10">
+              ⏱ {Math.floor(telemetry.session_duration / 60).toString().padStart(2, '0')}:{(telemetry.session_duration % 60).toString().padStart(2, '0')}
             </div>
           )}
+
+          {/* Floating Reps Badge di atas video */}
+          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none z-10">
+            <div className="bg-black/75 backdrop-blur-md border border-cyan-500/30 px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-2">
+              <span className="text-[10px] text-cyan-400 font-mono tracking-wider">REPETISI:</span>
+              <span className="text-2xl font-black text-white font-mono leading-none">{telemetry.rep_count}</span>
+              <span className="text-[10px] text-emerald-400">({telemetry.clean_reps} Bersih)</span>
+            </div>
+            <div className="bg-black/75 backdrop-blur-md border border-white/10 px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 font-mono">KEDALAMAN:</span>
+              <span className="text-base font-bold text-amber-400 font-mono">{telemetry.depth_pct}%</span>
+            </div>
+          </div>
         </div>
+
+        {/* Source Selector Toolbar (Webcam / Demo Video / Upload) */}
+        <div className="px-4 py-2 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between text-xs gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            <button
+              onClick={() => handleSourceChange('webcam')}
+              className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition-colors ${
+                videoSource === 'webcam' ? 'bg-cyan-600 text-white font-bold' : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              🎥 Live Webcam
+            </button>
+            <button
+              onClick={() => handleSourceChange('pushup_demo')}
+              className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition-colors ${
+                videoSource === 'pushup_demo' ? 'bg-cyan-600 text-white font-bold' : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              🎬 Demo Pushup
+            </button>
+            <button
+              onClick={() => handleSourceChange('squat_demo')}
+              className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap transition-colors ${
+                videoSource === 'squat_demo' ? 'bg-cyan-600 text-white font-bold' : 'bg-slate-800 text-slate-300 hover:text-white'
+              }`}
+            >
+              🎬 Demo Squat
+            </button>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="px-2 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-cyan-400 flex items-center gap-1 whitespace-nowrap"
+            title="Upload video sendiri untuk dianalisis oleh AI"
+          >
+            <Icon name="upload" size={12} />
+            <span>{uploading ? 'Mengunggah...' : uploadedFileName ? 'Ganti Video' : 'Upload Video'}</span>
+          </button>
+        </div>
+
         <div className="analysis-panel">
           <div className="exercise-select">
             <span>
@@ -714,58 +971,164 @@ function Analyze({ go }: { go: (screen: Screen) => void }) {
               <button
                 key={item}
                 className={exercise === item ? 'active' : ''}
-                onClick={() => setExercise(item)}
+                onClick={() => handleSelectExercise(item)}
               >
                 {t(item)}
               </button>
             ))}
           </div>
-          {running && (
-            <>
-              <div className="posture-feedback good">
-                <i>✓</i><div><b>{t('Postur baik')}</b><span>{t('Gerakan stabil dan siap dihitung.')}</span></div>
-              </div>
-              <div className="live-metrics">
-                <div><small>{t('REPETISI')}</small><b>12</b></div>
-                <div><small>{t('KEDALAMAN')}</small><b>86%</b></div>
-                <div><small>{t('POSTUR')}</small><b className="good">{t('Baik')}</b></div>
-              </div>
-            </>
-          )}
-          <button
-            className={`record-button ${running ? 'stop' : ''}`}
-            onClick={() => cameraState === 'ready' ? setRunning(!running) : enableCamera()}
-            disabled={cameraState === 'requesting'}
-          >
-            <i>{running ? <span /> : <Icon name="play" size={19} />}</i>
-            {t(running ? 'Selesai Analisis' : 'Mulai Analisis')}
-          </button>
+
+          {/* Real-time Posture & Kinematics Feedback */}
+          <div className={`posture-feedback ${isFormGood ? 'good' : 'warning'}`}>
+            <i>{isFormGood ? '✓' : '!'}</i>
+            <div>
+              <b>{isFormGood ? t('Postur baik') : 'Perhatian Postur'}</b>
+              <span>{telemetry.status || t('Gerakan stabil dan siap dihitung.')}</span>
+            </div>
+          </div>
+
+          {/* Real-time Dynamic Metrics */}
+          <div className="live-metrics">
+            <div>
+              <small>{t('REPETISI')}</small>
+              <b>{telemetry.rep_count}</b>
+            </div>
+            <div>
+              <small>{t('KEDALAMAN')}</small>
+              <b>{telemetry.depth_pct}%</b>
+            </div>
+            <div>
+              <small>{t('POSTUR')}</small>
+              <b className={isFormGood ? 'good' : 'text-amber-400'}>
+                {isFormGood ? t('Baik') : 'Perbaiki'}
+              </b>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <button
+              className={`record-button !mt-0 ${running ? 'stop' : ''}`}
+              onClick={toggleSession}
+            >
+              <i>{running ? <span /> : <Icon name="play" size={19} />}</i>
+              {t(running ? 'Selesai Analisis' : 'Mulai Analisis')}
+            </button>
+
+            <button
+              className="h-[52px] rounded-lg border border-slate-700 bg-slate-900/80 hover:bg-slate-800 text-xs font-semibold text-slate-300 flex items-center justify-center gap-1.5 transition-all"
+              onClick={async () => {
+                try {
+                  await fetch('/api/reset_reps', { method: 'POST' })
+                  setTelemetry((prev) => ({ ...prev, rep_count: 0, clean_reps: 0, bad_reps: 0, depth_pct: 0 }))
+                } catch (e) {
+                  console.warn(e)
+                }
+              }}
+            >
+              <Icon name="refresh" size={16} />
+              <span>Reset Reps</span>
+            </button>
+          </div>
         </div>
       </div>
     </AppLayout>
   )
 }
 
-const sessions = [
-  { type: 'Squat', date: 'Hari ini, 08:24', reps: '24 reps', score: 94, icon: 'squat' },
-  { type: 'Push-up', date: 'Kemarin, 17:10', reps: '18 reps', score: 88, icon: 'pushup' },
-  { type: 'Sit-up', date: '24 Feb, 07:45', reps: '22 reps', score: 91, icon: 'situp' },
-  { type: 'Squat', date: '22 Feb, 18:30', reps: '30 reps', score: 86, icon: 'squat' },
+export interface SessionRecord {
+  id: string
+  type: string
+  date: string
+  reps: string
+  repCount: number
+  cleanReps: number
+  score: number
+  duration: string
+  accuracy: number
+  avgAngle: number
+  icon: string
+  feedback: string
+}
+
+const initialSessions: SessionRecord[] = [
+  {
+    id: 's-1',
+    type: 'Squat',
+    date: 'Hari ini, 08:24',
+    reps: '24 reps',
+    repCount: 24,
+    cleanReps: 22,
+    score: 94,
+    duration: '02:45',
+    accuracy: 92,
+    avgAngle: 88,
+    icon: 'squat',
+    feedback: 'Rentang gerak (ROM) sangat baik. Kedalaman squat konsisten di bawah 90 derajat.'
+  },
+  {
+    id: 's-2',
+    type: 'Push-up',
+    date: 'Kemarin, 17:10',
+    reps: '18 reps',
+    repCount: 18,
+    cleanReps: 16,
+    score: 88,
+    duration: '01:50',
+    accuracy: 89,
+    avgAngle: 90,
+    icon: 'pushup',
+    feedback: 'Bahu dan pinggul sejajar. Jaga agar siku tidak terlalu melebar.'
+  },
+  {
+    id: 's-3',
+    type: 'Sit-up',
+    date: '24 Feb, 07:45',
+    reps: '22 reps',
+    repCount: 22,
+    cleanReps: 20,
+    score: 91,
+    duration: '02:15',
+    accuracy: 91,
+    avgAngle: 45,
+    icon: 'situp',
+    feedback: 'Aktivasi otot perut stabil dan kecepatan repetisi terjaga ritmis.'
+  },
+  {
+    id: 's-4',
+    type: 'Squat',
+    date: '22 Feb, 18:30',
+    reps: '30 reps',
+    repCount: 30,
+    cleanReps: 26,
+    score: 86,
+    duration: '03:10',
+    accuracy: 87,
+    avgAngle: 92,
+    icon: 'squat',
+    feedback: 'Bagus, perhatikan posisi punggung saat repetisi akhir agar tidak membungkuk.'
+  },
 ]
+
 
 function History({
   go,
   openSession,
+  sessionList,
 }: {
   go: (screen: Screen) => void
-  openSession: (session: (typeof sessions)[number]) => void
+  openSession: (session: SessionRecord) => void
+  sessionList: SessionRecord[]
 }) {
   const [filterOpen, setFilterOpen] = useState(false)
   const [filter, setFilter] = useState('Semua')
-  const [selectedBar, setSelectedBar] = useState(5)
+  const [selectedBar, setSelectedBar] = useState(0)
   const { t } = useLanguage()
-  const visibleSessions = filter === 'Semua' ? sessions : sessions.filter((session) => session.type === filter)
-  const overviewData = [2, 4, 3, 6, 4, 8, 5]
+  const visibleSessions = filter === 'Semua' ? sessionList : sessionList.filter((session) => session.type === filter)
+
+  // Buat mini bars dari sesi-sesi terbaru
+  const recentReps = sessionList.slice(0, 7).map((s) => s.repCount).reverse()
+  const overviewData = recentReps.length > 0 ? recentReps : [12, 18, 15, 20, 14, 25, 22]
+
   return (
     <AppLayout current="history" go={go}>
       <div className="page-mobile-head">
@@ -780,26 +1143,30 @@ function History({
         onKeyDown={(event) => event.key === 'Enter' && go('analytics')}
       >
         <div>
-          <small>{t('FEBRUARI 2026')}</small>
-          <b>{t('8 sesi')}</b>
-          <span>{t('+24% dari Januari')}</span>
+          <small>{t('AKTIVITAS SKELIO')}</small>
+          <b>{sessionList.length} {t('sesi')}</b>
+          <span>{t('Data latihan & AI realtime')}</span>
           <em>{t('Lihat statistik lengkap')} <Icon name="arrow" size={12} /></em>
         </div>
         <div className="mini-bars">
-          {overviewData.map((value, index) => (
-            <button
-              key={index}
-              style={{ height: `${value * 11}%` }}
-              className={selectedBar === index ? 'peak' : ''}
-              onClick={(event) => {
-                event.stopPropagation()
-                setSelectedBar(index)
-              }}
-              aria-label={`${value} ${t('sesi')}`}
-            >
-              {selectedBar === index && <span>{value}</span>}
-            </button>
-          ))}
+          {overviewData.map((value, index) => {
+            const maxVal = Math.max(1, ...overviewData)
+            const heightPct = Math.min(100, Math.max(15, Math.round((value / maxVal) * 100)))
+            return (
+              <button
+                key={index}
+                style={{ height: `${heightPct}%` }}
+                className={selectedBar === index ? 'peak' : ''}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setSelectedBar(index)
+                }}
+                aria-label={`${value} reps`}
+              >
+                {selectedBar === index && <span>{value}</span>}
+              </button>
+            )
+          })}
         </div>
       </section>
       <div className="history-title">
@@ -825,32 +1192,60 @@ function History({
         </div>
       )}
       <div className="session-list">
-        {visibleSessions.map((session, index) => (
-          <button className="session-item" key={`${session.date}-${index}`} onClick={() => openSession(session)}>
-            <span className="session-icon"><Icon name={session.icon} size={25} /></span>
-            <div>
-              <h3>{t(session.type)}</h3>
-              <p>{t(session.date)} · {session.reps}</p>
-            </div>
-            <span className="score">
-              <b>{session.score}</b>
-              <small>{t('SKOR')}</small>
-            </span>
-            <Icon name="arrow" size={16} />
-          </button>
-        ))}
+        {visibleSessions.length === 0 ? (
+          <div className="text-center py-8 text-slate-400 text-xs">
+            Belum ada riwayat latihan. Mulai latihan di tab Analisis!
+          </div>
+        ) : (
+          visibleSessions.map((session, index) => (
+            <button className="session-item" key={`${session.id || session.date}-${index}`} onClick={() => openSession(session)}>
+              <span className="session-icon"><Icon name={session.icon} size={25} /></span>
+              <div>
+                <h3>{t(session.type)}</h3>
+                <p>{session.date} · {session.reps}</p>
+              </div>
+              <span className="score">
+                <b>{session.score}</b>
+                <small>{t('SKOR')}</small>
+              </span>
+              <Icon name="arrow" size={16} />
+            </button>
+          ))
+        )}
       </div>
     </AppLayout>
   )
 }
 
-function Analytics({ go }: { go: (screen: Screen) => void }) {
+function Analytics({
+  go,
+  sessionList,
+}: {
+  go: (screen: Screen) => void
+  sessionList: SessionRecord[]
+}) {
   const { t } = useLanguage()
-  const [period, setPeriod] = useState<'Minggu' | 'Bulan' | '3 Bulan'>('Bulan')
+  const [period, setPeriod] = useState<'Minggu' | 'Bulan' | '3 Bulan'>('Minggu')
+
+  // Hitung metrik dinamis dari seluruh riwayat sesi
+  const totalSessions = sessionList.length
+  const totalReps = sessionList.reduce((acc, s) => acc + s.repCount, 0)
+  const avgScore = totalSessions > 0 ? Math.round(sessionList.reduce((acc, s) => acc + s.score, 0) / totalSessions) : 0
+  const totalCleanReps = sessionList.reduce((acc, s) => acc + s.cleanReps, 0)
+  const cleanPct = totalReps > 0 ? Math.round((totalCleanReps / totalReps) * 100) : 0
+
+  // Hitung breakdown jenis latihan
+  const pushupCount = sessionList.filter((s) => s.type.toLowerCase().includes('push')).reduce((a, b) => a + b.repCount, 0)
+  const squatCount = sessionList.filter((s) => s.type.toLowerCase().includes('squat')).reduce((a, b) => a + b.repCount, 0)
+  const situpCount = sessionList.filter((s) => s.type.toLowerCase().includes('sit')).reduce((a, b) => a + b.repCount, 0)
+  const maxCategory = Math.max(1, pushupCount, squatCount, situpCount)
+
+  // Data grafik per periode
+  const defaultChart = [3, 5, 4, 7, 6, 8, Math.max(1, sessionList.length)]
   const datasets = {
-    Minggu: [2, 3, 1, 4, 3, 5, 4],
-    Bulan: [3, 5, 4, 7, 5, 8, 6, 9],
-    '3 Bulan': [12, 18, 24],
+    Minggu: sessionList.length >= 7 ? sessionList.slice(0, 7).map((s) => s.repCount).reverse() : defaultChart,
+    Bulan: [8, 12, 15, 14, 19, 22, 20, Math.max(10, totalReps)],
+    '3 Bulan': [28, 45, Math.max(50, totalReps + 30)],
   }
   const labels = {
     Minggu: ['S', 'S', 'R', 'K', 'J', 'S', 'M'],
@@ -858,13 +1253,13 @@ function Analytics({ go }: { go: (screen: Screen) => void }) {
     '3 Bulan': ['Des', 'Jan', 'Feb'],
   }
   const data = datasets[period]
-  const [selected, setSelected] = useState(5)
+  const [selected, setSelected] = useState(data.length - 1)
   const activeIndex = Math.min(selected, data.length - 1)
-  const maxValue = Math.max(...data)
+  const maxValue = Math.max(1, ...data)
 
   const changePeriod = (next: 'Minggu' | 'Bulan' | '3 Bulan') => {
     setPeriod(next)
-    setSelected(next === '3 Bulan' ? 2 : next === 'Minggu' ? 6 : 5)
+    setSelected(datasets[next].length - 1)
   }
 
   return (
@@ -878,8 +1273,14 @@ function Analytics({ go }: { go: (screen: Screen) => void }) {
       </div>
       <section className="analytics-chart">
         <div className="chart-heading">
-          <div><span>{t('Aktivitas latihan')}</span><b>{data.reduce((sum, value) => sum + value, 0)} {t('sesi')}</b></div>
-          <div className="chart-value"><b>{data[activeIndex]}</b><span>{labels[period][activeIndex]}</span></div>
+          <div>
+            <span>{t('Aktivitas latihan')}</span>
+            <b>{data.reduce((sum, value) => sum + value, 0)} {period === 'Minggu' ? 'reps' : t('sesi')}</b>
+          </div>
+          <div className="chart-value">
+            <b>{data[activeIndex]}</b>
+            <span>{labels[period][activeIndex] || 'Aktif'}</span>
+          </div>
         </div>
         <div className="chart-area">
           <div className="chart-lines"><i /><i /><i /></div>
@@ -897,21 +1298,21 @@ function Analytics({ go }: { go: (screen: Screen) => void }) {
         </div>
       </section>
       <section className="analytics-metrics">
-        <div><span>{t('Total latihan')}</span><b>8</b><small>+24%</small></div>
-        <div><span>{t('Total waktu')}</span><b>84</b><small>{t('menit')}</small></div>
-        <div><span>{t('Rata-rata skor')}</span><b>91%</b><small>+3%</small></div>
-        <div><span>{t('Repetisi bersih')}</span><b>164</b><small>92%</small></div>
+        <div><span>{t('Total latihan')}</span><b>{totalSessions}</b><small>sesi</small></div>
+        <div><span>{t('Total repetisi')}</span><b>{totalReps}</b><small>reps</small></div>
+        <div><span>{t('Rata-rata skor')}</span><b>{avgScore}%</b><small>akurasi</small></div>
+        <div><span>{t('Repetisi bersih')}</span><b>{totalCleanReps}</b><small>{cleanPct}%</small></div>
       </section>
       <section className="exercise-breakdown">
         <h3>{t('JENIS LATIHAN')}</h3>
         {[
-          ['Push-up', 42, '74 reps'],
-          ['Squat', 35, '68 reps'],
-          ['Sit-up', 23, '42 reps'],
+          ['Push-up', Math.round((pushupCount / maxCategory) * 100), `${pushupCount} reps`],
+          ['Squat', Math.round((squatCount / maxCategory) * 100), `${squatCount} reps`],
+          ['Sit-up', Math.round((situpCount / maxCategory) * 100), `${situpCount} reps`],
         ].map(([name, width, value]) => (
           <div key={name as string}>
             <span><b>{name}</b><small>{value}</small></span>
-            <i><em style={{ width: `${width}%` }} /></i>
+            <i><em style={{ width: `${Math.max(8, width as number)}%` }} /></i>
           </div>
         ))}
       </section>
@@ -1013,9 +1414,11 @@ function ForgotPassword({ go }: { go: (screen: Screen) => void }) {
 function Notifications({
   go,
   openSession,
+  firstSession,
 }: {
   go: (screen: Screen) => void
-  openSession: (session: (typeof sessions)[number]) => void
+  openSession: (session: SessionRecord) => void
+  firstSession: SessionRecord
 }) {
   const { t } = useLanguage()
   const notices = [
@@ -1030,7 +1433,7 @@ function Notifications({
           <button
             key={title}
             className={index === 0 ? 'unread' : ''}
-            onClick={() => index === 0 ? openSession(sessions[0]) : index === 1 ? go('home') : go('help')}
+            onClick={() => index === 0 ? openSession(firstSession) : index === 1 ? go('home') : go('help')}
           >
             <i />
             <div><h3>{t(title)}</h3><p>{t(text)}</p><span>{t(time)}</span></div>
@@ -1047,25 +1450,25 @@ function SessionDetail({
   session,
 }: {
   go: (screen: Screen) => void
-  session: (typeof sessions)[number]
+  session: SessionRecord
 }) {
   const { t } = useLanguage()
   return (
-    <DetailLayout title="Hasil analisis" eyebrow={`${t(session.type).toUpperCase()} · ${t(session.date).toUpperCase()}`} back={() => go('history')}>
+    <DetailLayout title="Hasil analisis" eyebrow={`${t(session.type).toUpperCase()} · ${session.date.toUpperCase()}`} back={() => go('history')}>
       <section className="result-score">
         <div className="score-ring"><b>{session.score}</b><span>{t('SKOR')}</span></div>
-        <div><span>{t('POSTUR KESELURUHAN')}</span><h2>{t('Sangat baik')}</h2><p>{t('Gerakan stabil dan kedalaman repetisi konsisten.')}</p></div>
+        <div><span>{t('POSTUR KESELURUHAN')}</span><h2>{session.score >= 85 ? t('Sangat baik') : t('Perlu Bimbingan')}</h2><p>{session.feedback || t('Gerakan stabil dan kedalaman repetisi konsisten.')}</p></div>
       </section>
       <section className="result-metrics">
-        <div><span>{t('REPETISI')}</span><b>{session.reps.split(' ')[0]}</b><small>{t(session.reps.includes('reps') ? 'Clean reps tercatat' : 'Durasi tertahan')}</small></div>
-        <div><span>{t('DURASI')}</span><b>02:18</b><small>{t('Waktu aktif')}</small></div>
-        <div><span>{t('AKURASI')}</span><b>94%</b><small>{t('+3% dari sesi lalu')}</small></div>
-        <div><span>{t('SUDUT SIKU')}</span><b>89°</b><small>{t('Rentang optimal')}</small></div>
+        <div><span>{t('REPETISI')}</span><b>{session.repCount}</b><small>{session.cleanReps} Clean reps</small></div>
+        <div><span>{t('DURASI')}</span><b>{session.duration}</b><small>{t('Waktu aktif')}</small></div>
+        <div><span>{t('AKURASI')}</span><b>{session.accuracy}%</b><small>{session.accuracy >= 90 ? '+3% optimal' : 'akurasi form'}</small></div>
+        <div><span>{t('SUDUT SENDI')}</span><b>{session.avgAngle}°</b><small>{t('Rentang optimal')}</small></div>
       </section>
       <section className="feedback-card">
         <span>{t('FEEDBACK AI')}</span>
-        <h3>{t('Pertahankan posisi tubuhmu')}</h3>
-        <p>{t('Postur bahu dan pinggul sudah sejajar. Pada dua repetisi terakhir, usahakan siku tidak terlalu melebar untuk menjaga beban tetap stabil.')}</p>
+        <h3>{session.score >= 85 ? t('Pertahankan posisi tubuhmu') : 'Koreksi Postur Diperlukan'}</h3>
+        <p>{session.feedback}</p>
       </section>
       <button className="main-button" onClick={() => go('analyze')}>{t('Ulangi latihan')}</button>
     </DetailLayout>
@@ -1251,17 +1654,43 @@ function AppLayout({
 export default function App() {
   const [screen, setScreen] = useState<Screen>('welcome')
   const [previousScreen, setPreviousScreen] = useState<Screen>('home')
-  const [selectedSession, setSelectedSession] = useState(sessions[0])
+  const [sessions, setSessions] = useState<SessionRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('skelio_sessions')
+      if (saved) return JSON.parse(saved)
+    } catch {
+      // Fallback
+    }
+    return initialSessions
+  })
+  const [selectedSession, setSelectedSession] = useState<SessionRecord>(sessions[0])
   const [language, setLanguage] = useState<Language>('id')
+
   const go = (next: Screen) => {
     setPreviousScreen(screen)
     setScreen(next)
     document.querySelector('.scroll-content')?.scrollTo({ top: 0 })
   }
-  const openSession = (session: (typeof sessions)[number]) => {
+
+  const openSession = (session: SessionRecord) => {
     setSelectedSession(session)
     go('sessionDetail')
   }
+
+  const handleSaveSession = (newRecord: SessionRecord) => {
+    setSessions((prev) => {
+      const updated = [newRecord, ...prev]
+      try {
+        localStorage.setItem('skelio_sessions', JSON.stringify(updated))
+      } catch (e) {
+        console.warn('Gagal menyimpan session:', e)
+      }
+      return updated
+    })
+    setSelectedSession(newRecord)
+    go('sessionDetail')
+  }
+
   return (
     <LanguageContext.Provider value={{ language, setLanguage }}>
       <div className="mobile-stage">
@@ -1271,12 +1700,12 @@ export default function App() {
           {screen === 'register' && <AuthScreen mode="register" go={go} />}
           {screen === 'forgotPassword' && <ForgotPassword go={go} />}
           {screen === 'home' && <Home go={go} />}
-          {screen === 'analyze' && <Analyze go={go} />}
-          {screen === 'history' && <History go={go} openSession={openSession} />}
-          {screen === 'analytics' && <Analytics go={go} />}
+          {screen === 'analyze' && <Analyze go={go} onSaveSession={handleSaveSession} />}
+          {screen === 'history' && <History go={go} openSession={openSession} sessionList={sessions} />}
+          {screen === 'analytics' && <Analytics go={go} sessionList={sessions} />}
           {screen === 'sessionDetail' && <SessionDetail go={go} session={selectedSession} />}
           {screen === 'profile' && <Profile go={go} />}
-          {screen === 'notifications' && <Notifications go={go} openSession={openSession} />}
+          {screen === 'notifications' && <Notifications go={go} openSession={openSession} firstSession={sessions[0]} />}
           {screen === 'editProfile' && <EditProfile go={go} />}
           {screen === 'settings' && <Settings go={go} backTo={previousScreen === 'analyze' ? 'analyze' : 'profile'} />}
           {screen === 'help' && <Help go={go} />}

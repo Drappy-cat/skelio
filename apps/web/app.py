@@ -17,7 +17,22 @@ if ROOT_DIR not in sys.path:
 
 from core.biomechanical_pipeline import BiomechanicalPipeline
 
-app = Flask(__name__, template_folder=os.path.join(BASE_DIR, 'templates'), static_folder=os.path.join(BASE_DIR, 'static'))
+DIST_DIR = os.path.join(ROOT_DIR, 'dist')
+app = Flask(
+    __name__,
+    static_folder=os.path.join(DIST_DIR, 'assets') if os.path.exists(DIST_DIR) else os.path.join(BASE_DIR, 'static'),
+    static_url_path='/assets' if os.path.exists(DIST_DIR) else '/static',
+    template_folder=DIST_DIR if os.path.exists(DIST_DIR) else os.path.join(BASE_DIR, 'templates')
+)
+
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+
 
 # Folder Penyimpanan Video Upload Pengguna
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
@@ -153,7 +168,19 @@ threading.Thread(target=stream_worker, daemon=True).start()
 
 @app.route('/')
 def index():
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
+        return send_file(os.path.join(DIST_DIR, 'index.html'))
     return render_template('index.html')
+
+@app.route('/<path:path>')
+def static_proxy(path):
+    file_path = os.path.join(DIST_DIR, path)
+    if os.path.exists(file_path):
+        return send_file(file_path)
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
+        return send_file(os.path.join(DIST_DIR, 'index.html'))
+    return "Not Found", 404
+
 
 @app.route('/video_feed')
 def video_feed():
