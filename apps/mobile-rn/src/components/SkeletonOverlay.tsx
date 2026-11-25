@@ -1,6 +1,5 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
-import Svg, { Circle, Line, Rect, Text as SvgText } from 'react-native-svg';
+import { StyleSheet, Text, View } from 'react-native';
 import type { PersonTelemetry } from '../engine/types';
 
 interface SkeletonOverlayProps {
@@ -12,13 +11,49 @@ interface SkeletonOverlayProps {
 const PERSON_COLORS = ['#00e6ff', '#50ff50', '#ff8c00'];
 const CONF_THRESHOLD = 0.35;
 
+interface SegmentLineProps {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  thickness: number;
+}
+
+const SegmentLine: React.FC<SegmentLineProps> = ({ x1, y1, x2, y2, color, thickness }) => {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.hypot(dx, dy);
+  if (length < 1) {
+    return null;
+  }
+  const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: midX - length / 2,
+        top: midY - thickness / 2,
+        width: length,
+        height: thickness,
+        borderRadius: thickness / 2,
+        backgroundColor: color,
+        transform: [{ rotate: `${angleDeg}deg` }],
+      }}
+    />
+  );
+};
+
 export const SkeletonOverlay: React.FC<SkeletonOverlayProps> = ({ width, height, persons }) => {
   if (width <= 0 || height <= 0 || persons.length === 0) {
     return null;
   }
 
   return (
-    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { width, height }]} pointerEvents="none">
       {persons.map((person, pIdx) => {
         const color = PERSON_COLORS[Math.min(pIdx, PERSON_COLORS.length - 1)];
         const kpts = person.keypoints;
@@ -58,24 +93,32 @@ export const SkeletonOverlay: React.FC<SkeletonOverlayProps> = ({ width, height,
           <React.Fragment key={`person-${person.track_id}`}>
             {bbox && (
               <>
-                <Rect
-                  x={bbox.x}
-                  y={bbox.y}
-                  width={bbox.w}
-                  height={bbox.h}
-                  stroke={color}
-                  strokeWidth={1.5}
-                  strokeDasharray="6 4"
-                  fill="none"
+                <View
+                  style={{
+                    position: 'absolute',
+                    left: bbox.x,
+                    top: bbox.y,
+                    width: bbox.w,
+                    height: bbox.h,
+                    borderWidth: 1.5,
+                    borderStyle: 'dashed',
+                    borderColor: color,
+                    borderRadius: 6,
+                  }}
                 />
-                <SvgText
-                  x={bbox.x + 6}
-                  y={Math.max(14, bbox.y - 6)}
-                  fill={color}
-                  fontSize="11"
-                  fontWeight="bold">
+                <Text
+                  style={{
+                    position: 'absolute',
+                    left: bbox.x + 4,
+                    top: Math.max(2, bbox.y - 16),
+                    color,
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    textShadowColor: '#000000',
+                    textShadowRadius: 3,
+                  }}>
                   {`P${person.rank} • ${person.exercise}`}
-                </SvgText>
+                </Text>
               </>
             )}
 
@@ -84,54 +127,71 @@ export const SkeletonOverlay: React.FC<SkeletonOverlayProps> = ({ width, height,
                 return null;
               }
               return (
-                <Line
+                <SegmentLine
                   key={`edge-${person.track_id}-${eIdx}`}
                   x1={kpts[i1][0] * width}
                   y1={kpts[i1][1] * height}
                   x2={kpts[i2][0] * width}
                   y2={kpts[i2][1] * height}
-                  stroke={color}
-                  strokeWidth={3}
-                  strokeLinecap="round"
+                  color={color}
+                  thickness={3}
                 />
               );
             })}
 
-            {validIndices.map(idx => (
-              <Circle
-                key={`kpt-${person.track_id}-${idx}`}
-                cx={kpts[idx][0] * width}
-                cy={kpts[idx][1] * height}
-                r={5}
-                fill={color}
-                stroke="#0b0f19"
-                strokeWidth={1.5}
-              />
-            ))}
+            {validIndices.map(idx => {
+              const cx = kpts[idx][0] * width;
+              const cy = kpts[idx][1] * height;
+              return (
+                <View
+                  key={`kpt-${person.track_id}-${idx}`}
+                  style={{
+                    position: 'absolute',
+                    left: cx - 5,
+                    top: cy - 5,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: color,
+                    borderWidth: 1.5,
+                    borderColor: '#0b0f19',
+                  }}
+                />
+              );
+            })}
 
-            {person.palms.map((palm, idx) => (
-              <React.Fragment key={`palm-${person.track_id}-${idx}`}>
-                <Line
-                  x1={palm.wrist[0] * width}
-                  y1={palm.wrist[1] * height}
-                  x2={palm.palm[0] * width}
-                  y2={palm.palm[1] * height}
-                  stroke="#38bdf8"
-                  strokeWidth={2.5}
-                />
-                <Circle
-                  cx={palm.palm[0] * width}
-                  cy={palm.palm[1] * height}
-                  r={6}
-                  fill="#22c55e"
-                  stroke="#052e16"
-                  strokeWidth={1.5}
-                />
-              </React.Fragment>
-            ))}
+            {person.palms.map((palm, idx) => {
+              const px = palm.palm[0] * width;
+              const py = palm.palm[1] * height;
+              return (
+                <React.Fragment key={`palm-${person.track_id}-${idx}`}>
+                  <SegmentLine
+                    x1={palm.wrist[0] * width}
+                    y1={palm.wrist[1] * height}
+                    x2={px}
+                    y2={py}
+                    color="#38bdf8"
+                    thickness={2.5}
+                  />
+                  <View
+                    style={{
+                      position: 'absolute',
+                      left: px - 6,
+                      top: py - 6,
+                      width: 12,
+                      height: 12,
+                      borderRadius: 6,
+                      backgroundColor: '#22c55e',
+                      borderWidth: 1.5,
+                      borderColor: '#052e16',
+                    }}
+                  />
+                </React.Fragment>
+              );
+            })}
           </React.Fragment>
         );
       })}
-    </Svg>
+    </View>
   );
 };

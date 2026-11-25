@@ -44,11 +44,12 @@ react {
     // extraPackagerArgs = []
 
     /* Hermes Commands */
-    //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
-    //
-    //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
-    // hermesFlags = ["-O", "-output-source-map"]
+    // On Windows, wrap hermesc.exe to gracefully fall back to plain minified JS
+    // if hermes-compiler's win64-bin hermesc.exe fails DLL init (-1073741502).
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+        hermesCommand = "scripts/hermesc-win.bat"
+        hermesFlags = ["-O"]
+    }
 
     /* Autolinking */
     autolinkLibrariesWithApp()
@@ -81,7 +82,7 @@ android {
     namespace "id.ac.unesa.skelio"
     externalNativeBuild {
         cmake {
-            buildStagingDirectory = file("${System.getProperty('user.home')}/.skelio_cxx/app")
+            buildStagingDirectory = file("${System.getProperty('user.home')}/.sc/app")
         }
     }
     defaultConfig {
@@ -90,6 +91,11 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_OBJECT_PATH_MAX=180"
+            }
+        }
     }
     signingConfigs {
         debug {

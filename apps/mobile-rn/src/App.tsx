@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StatusBar,
@@ -10,7 +11,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   Camera,
   type CameraRef,
@@ -31,10 +31,10 @@ const sleep = (ms: number): Promise<void> =>
 
 export function App() {
   return (
-    <SafeAreaProvider>
+    <>
       <StatusBar barStyle="light-content" />
       <SkelioNativeScreen />
-    </SafeAreaProvider>
+    </>
   );
 }
 
@@ -252,7 +252,11 @@ function SkelioNativeScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.root}>
+    <View
+      style={[
+        styles.root,
+        { paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0 },
+      ]}>
       <View
         style={[
           styles.mainContainer,
@@ -399,7 +403,7 @@ function SkelioNativeScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

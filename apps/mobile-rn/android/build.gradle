@@ -20,14 +20,21 @@ buildscript {
 
 apply plugin: "com.facebook.react.rootproject"
 
-// Shorten CMake/Ninja staging path on Windows to avoid MAX_PATH (260 chars) & Ninja dirty-manifest loops
+// Shorten CMake/Ninja staging path & object path hash limit on Windows (avoid MAX_PATH 260 chars without subst)
 subprojects { sub ->
     def configureCxxPath = {
         if (file("${sub.projectDir}/CMakeLists.txt").exists() || file("${sub.projectDir}/src/main/jni/CMakeLists.txt").exists()) {
             sub.android {
+                defaultConfig {
+                    externalNativeBuild {
+                        cmake {
+                            arguments "-DCMAKE_OBJECT_PATH_MAX=180"
+                        }
+                    }
+                }
                 externalNativeBuild {
                     cmake {
-                        buildStagingDirectory = file("${System.getProperty('user.home')}/.skelio_cxx/${sub.name}")
+                        buildStagingDirectory = file("${System.getProperty('user.home')}/.sc/${sub.name}")
                     }
                 }
             }
