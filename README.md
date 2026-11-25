@@ -84,11 +84,7 @@ skelio/
 ├── 🎬 assets_sempro/           # Grafik high-res dan rekaman video demo
 ├── 🧠 biomechanical_pipeline.py# Entry-point utama pipeline OpenCV
 ├── 🏋️ yolo11n-pose.pt          # Bobot model YOLOv11n-Pose baseline (root)
-├── 🚀 run_skelio.bat           # Launcher 1-klik LIVE Webcam (OpenCV)
-├── 🌐 run_skelio_app.bat       # Launcher 1-klik Web Dashboard (Flask)
-├── 🖥️ run_skelio_desktop_app.bat # Launcher 1-klik Standalone Desktop Window
-├── 🎬 run_demo_video_pushup.bat# Launcher 1-klik Demo Video Push-Up
-├── 🏋️ run_demo_video_squat.bat # Launcher 1-klik Demo Video Squat
+├── 🚀 run_skelio.bat           # Unified Launcher (API Android, Webcam, Web/Desktop, Demo, APK)
 └── requirements.txt            # Dependensi pustaka Python
 ```
 
@@ -120,24 +116,15 @@ pip install -r requirements.txt
 pip install flask
 ```
 
-### 2. Menjalankan Sistem SKELIO
-- **Web Application Dashboard (Flask — `http://localhost:5000`):**
-  Dobel klik `run_skelio_app.bat` atau jalankan:
-  ```bash
-  py -3.11 apps/web/app.py
-  ```
-- **Native Desktop App (Jendela Mandiri Edge/Chrome):**
-  Dobel klik `run_skelio_desktop_app.bat`
-- **Live Webcam (OpenCV Pipeline):**
-  Dobel klik `run_skelio.bat` atau jalankan:
-  ```bash
-  py -3.11 biomechanical_pipeline.py
-  ```
-- **Demo Video Offline (Tanpa Perlu Gerakan Fisik di Depan Penguji):**
-  - Push-Up: Dobel klik `run_demo_video_pushup.bat` (atau `py -3.11 biomechanical_pipeline.py "assets_sempro/raw_push-up_sample.mp4"`)
-  - Squat: Dobel klik `run_demo_video_squat.bat` (atau `py -3.11 biomechanical_pipeline.py "assets_sempro/raw_squat_sample.mp4"`)
+### 2. Menjalankan Sistem SKELIO (Satu Pintu `run_skelio.bat`)
+Cukup **klik ganda `run_skelio.bat`** untuk membuka menu interaktif, atau jalankan langsung lewat argumen terminal:
+- **`[1]` Server API Android (FastAPI + WebSocket `:8000`):** `run_skelio.bat api`
+- **`[2]` Live Webcam Laptop (OpenCV Pipeline):** `run_skelio.bat cam`
+- **`[3]` Web / Desktop Dashboard (Flask `:5000`):** `run_skelio.bat web`
+- **`[4]` Demo Video Offline (Push-Up / Squat):** `run_skelio.bat demo`
+- **`[5]` Android APK Tool (Install USB ADB / Build Release):** `run_skelio.bat apk`
 
-> **Catatan:** Jika di PC hanya terpasang Python 3.10 (bukan 3.11), ganti `py -3.11` dengan `py -3.10`.
+> **Catatan:** `run_skelio.bat` otomatis mendeteksi interpreter Python (`py -3.11`, `python`, atau `py -3.10`) yang sudah terpasang library `cv2` dan `ultralytics`.
 
 ### 🎮 Kontrol Keyboard Interaktif:
 - `1` : Mode Push-Up (Sudut siku & kelurusan tulang punggung).
