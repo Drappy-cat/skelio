@@ -27,7 +27,7 @@ subprojects { sub ->
             sub.android {
                 externalNativeBuild {
                     cmake {
-                        buildStagingDirectory = file("${System.getProperty('user.home')}/.skelio_cxx/${sub.name}")
+                        buildStagingDirectory = file("${System.getProperty('user.home')}/.sc/${sub.name}")
                     }
                 }
             }

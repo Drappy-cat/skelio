@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StatusBar,
@@ -10,7 +11,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   Camera,
   type CameraRef,
@@ -31,10 +31,10 @@ const sleep = (ms: number): Promise<void> =>
 
 export function App() {
   return (
-    <SafeAreaProvider>
+    <View style={styles.root}>
       <StatusBar barStyle="light-content" />
       <SkelioNativeScreen />
-    </SafeAreaProvider>
+    </View>
   );
 }
 
@@ -251,8 +251,10 @@ function SkelioNativeScreen() {
     </View>
   );
 
+  const topInset = !isLandscape && Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0;
+
   return (
-    <SafeAreaView style={styles.root}>
+    <View style={[styles.root, topInset > 0 && { paddingTop: topInset }]}>
       <View
         style={[
           styles.mainContainer,
@@ -367,7 +369,7 @@ function SkelioNativeScreen() {
             <Text style={styles.modalTitle}>Alamat Server FastAPI WebSocket</Text>
             <Text style={styles.modalDesc}>
               Pastikan HP & Laptop terhubung di Wi-Fi yang sama, lalu jalankan{' '}
-              run_skelio_api.bat.
+              run_skelio.bat (Mode 1: Server API Android).
             </Text>
             <TextInput
               value={draftUrl}
@@ -399,7 +401,7 @@ function SkelioNativeScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
