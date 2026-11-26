@@ -346,6 +346,18 @@ function Icon({
         <path d="M8 10V7a4 4 0 0 1 8 0v3" />
       </>
     ),
+    upload: (
+      <>
+        <path d="M12 16V4m0 0-4 4m4-4 4 4" />
+        <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
+      </>
+    ),
+    refresh: (
+      <>
+        <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" />
+        <path d="M21 3v5h-5" />
+      </>
+    ),
   }
   return (
     <svg

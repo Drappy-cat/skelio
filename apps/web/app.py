@@ -20,9 +20,9 @@ from core.biomechanical_pipeline import BiomechanicalPipeline
 DIST_DIR = os.path.join(ROOT_DIR, 'dist')
 app = Flask(
     __name__,
-    static_folder=os.path.join(DIST_DIR, 'assets') if os.path.exists(DIST_DIR) else os.path.join(BASE_DIR, 'static'),
-    static_url_path='/assets' if os.path.exists(DIST_DIR) else '/static',
-    template_folder=DIST_DIR if os.path.exists(DIST_DIR) else os.path.join(BASE_DIR, 'templates')
+    static_folder=os.path.join(BASE_DIR, 'static'),
+    static_url_path='/static',
+    template_folder=os.path.join(BASE_DIR, 'templates')
 )
 
 
@@ -61,17 +61,21 @@ DEMO_VIDEOS = {
     "squat_demo": os.path.join(ROOT_DIR, "assets_sempro", "raw_squat_sample.mp4"),
 }
 
+pipeline_lock = threading.Lock()
+
 def get_pipeline():
     global pipeline
     if pipeline is None:
-        candidates = [
-            os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
-            os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
-            r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
-            os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
-        ]
-        model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
-        pipeline = BiomechanicalPipeline(pose_model_path=model_path)
+        with pipeline_lock:
+            if pipeline is None:
+                candidates = [
+                    os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+                    os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+                    r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
+                    os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
+                ]
+                model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
+                pipeline = BiomechanicalPipeline(pose_model_path=model_path)
     return pipeline
 
 def open_capture(source_key):
@@ -174,10 +178,15 @@ def index():
 
 @app.route('/<path:path>')
 def static_proxy(path):
+    if path.startswith('api/'):
+        return jsonify({"error": "Not Found"}), 404
     file_path = os.path.join(DIST_DIR, path)
-    if os.path.exists(file_path):
+    if os.path.isfile(file_path):
         return send_file(file_path)
-    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
+    static_fallback = os.path.join(BASE_DIR, 'static', path)
+    if os.path.isfile(static_fallback):
+        return send_file(static_fallback)
+    if os.path.isfile(os.path.join(DIST_DIR, 'index.html')):
         return send_file(os.path.join(DIST_DIR, 'index.html'))
     return "Not Found", 404
 
@@ -478,12 +487,14 @@ def api_export_history():
 if __name__ == '__main__':
     port = 5000
     print(f"🚀 SKELIO Web Application siap berjalan di: http://localhost:{port}")
-    
-    # Buka browser otomatis saat server sudah dipastikan aktif dan siap
-    def open_browser_when_ready():
-        time.sleep(1.5)
-        import webbrowser
-        webbrowser.open(f"http://localhost:{port}")
-    
-    threading.Thread(target=open_browser_when_ready, daemon=True).start()
+
+    # Buka browser otomatis kecuali dinonaktifkan (mis. mode Fullstack Vite / App Window)
+    if os.environ.get("SKELIO_NO_BROWSER") != "1" and "--no-browser" not in sys.argv:
+        def open_browser_when_ready():
+            time.sleep(1.5)
+            import webbrowser
+            webbrowser.open(f"http://localhost:{port}")
+
+        threading.Thread(target=open_browser_when_ready, daemon=True).start()
+
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

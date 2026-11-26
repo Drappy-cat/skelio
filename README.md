@@ -118,10 +118,10 @@ pip install flask
 
 ### 2. Menjalankan Sistem SKELIO (Satu Pintu `run_skelio.bat`)
 Cukup **klik ganda `run_skelio.bat`** untuk membuka menu interaktif, atau jalankan langsung lewat argumen terminal:
-- **`[1]` Server API Android (FastAPI + WebSocket `:8000`):** `run_skelio.bat api`
-- **`[2]` Live Webcam Laptop (OpenCV Pipeline):** `run_skelio.bat cam`
-- **`[3]` Web / Desktop Dashboard (Flask `:5000`):** `run_skelio.bat web`
-- **`[4]` Demo Video Offline (Push-Up / Squat):** `run_skelio.bat demo`
+- **`[1]` Server API Android Native (FastAPI + WebSocket `:8000`):** `run_skelio.bat api`
+- **`[2]` Aplikasi Web UI Baru — All-in-One (UI React + Flask AI `:5000`):** `run_skelio.bat web`
+- **`[3]` Mode Developer Fullstack (Flask `:5000` + Vite HMR `:5173`):** `run_skelio.bat fullstack`
+- **`[4]` OpenCV Desktop Pipeline (Webcam / Demo Video):** `run_skelio.bat cam` atau `run_skelio.bat demo`
 - **`[5]` Android APK Tool (Install USB ADB / Build Release):** `run_skelio.bat apk`
 
 > **Catatan:** `run_skelio.bat` otomatis mendeteksi interpreter Python (`py -3.11`, `python`, atau `py -3.10`) yang sudah terpasang library `cv2` dan `ultralytics`.
