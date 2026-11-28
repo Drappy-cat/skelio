@@ -11,11 +11,27 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
+  },
+  optimizeDeps: {
+    entries: ['index.html'],
   },
   server: {
     port: 5173,
+    watch: {
+      ignored: [
+        '**/dataset/**',
+        '**/models/**',
+        '**/runs/**',
+        '**/yolo11*/**',
+        '**/assets_sempro/**',
+        '**/docs/**',
+        '**/notebooks/**',
+        '**/apps/**',
+        '**/core/**',
+      ],
+    },
     proxy: {
       '/video_feed': {
         target: 'http://localhost:5000',

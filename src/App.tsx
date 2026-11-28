@@ -1,6 +1,19 @@
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useRef, useState } from 'react'
 import pushupHero from './assets/pushup-hero.png'
 import skelioLogo from './assets/skelio-logo.webp'
+import { TrainingPlanScreen } from './TrainingPlanScreen'
+import {
+  DEFAULT_TRAINING_PLANS,
+  EXERCISE_RECOMMENDATIONS,
+  ExerciseKind,
+  TargetEvaluation,
+  TrainingPlan,
+  evaluateWorkoutTarget,
+  formatMinutesClock,
+  formatSecondsClock,
+  getCompletedSetsCount,
+  getPlanTotalReps,
+} from './trainingPlan'
 
 type Screen =
   | 'welcome'
@@ -9,6 +22,7 @@ type Screen =
   | 'forgotPassword'
   | 'home'
   | 'analyze'
+  | 'trainingPlan'
   | 'history'
   | 'analytics'
   | 'sessionDetail'
@@ -161,7 +175,6 @@ const english: Record<string, string> = {
   'Clean reps tercatat': 'Clean reps recorded',
   'Durasi tertahan': 'Hold duration',
   '+3% dari sesi lalu': '+3% from last session',
-  'Edit profil': 'Edit profile',
   'Baru saja': 'Just now',
   '2 jam lalu': '2 hours ago',
   'Kemarin': 'Yesterday',
@@ -540,8 +553,19 @@ function AppHeader({ go }: { go: (screen: Screen) => void }) {
   )
 }
 
-function Home({ go }: { go: (screen: Screen) => void }) {
-  const { t } = useLanguage()
+function Home({
+  go,
+  activePlan,
+  onStartExercise,
+  onApplyRecommendation,
+}: {
+  go: (screen: Screen) => void
+  activePlan: TrainingPlan
+  onStartExercise: (ex: ExerciseKind) => void
+  onApplyRecommendation: (ex: ExerciseKind) => void
+}) {
+  const { t, language } = useLanguage()
+  const targetReps = getPlanTotalReps(activePlan)
   return (
     <AppLayout current="home" go={go}>
       <AppHeader go={go} />
@@ -566,6 +590,45 @@ function Home({ go }: { go: (screen: Screen) => void }) {
         </div>
       </section>
 
+      <section className="home-target-card">
+        <div className="home-target-head">
+          <div>
+            <span>{language === 'en' ? 'ACTIVE TARGET PLAN' : 'TARGET LATIHAN AKTIF'}</span>
+            <h3>{activePlan.name}</h3>
+            <p>
+              <b>{targetReps}</b> {activePlan.exercise} · {activePlan.sets.length} set ·{' '}
+              {activePlan.targetMinutes} {language === 'en' ? 'min' : 'menit'}
+            </p>
+          </div>
+          <span className="home-target-badge">{activePlan.difficulty}</span>
+        </div>
+        <div className="home-target-recs">
+          <small>{language === 'en' ? 'Recommended:' : 'Rekomendasi:'}</small>
+          {(['Push-up', 'Sit-up', 'Squat'] as ExerciseKind[]).map((ex) => {
+            const rec = EXERCISE_RECOMMENDATIONS[ex][1]
+            const recTotal = rec.sets.reduce((sum, s) => sum + s.reps, 0)
+            return (
+              <button
+                key={ex}
+                type="button"
+                className={activePlan.exercise === ex ? 'active' : ''}
+                onClick={() => onApplyRecommendation(ex)}
+              >
+                {ex} · {recTotal}
+              </button>
+            )
+          })}
+        </div>
+        <div className="home-target-actions">
+          <button type="button" className="secondary" onClick={() => go('trainingPlan')}>
+            {language === 'en' ? 'Customize Target' : 'Atur Target'}
+          </button>
+          <button type="button" className="primary" onClick={() => onStartExercise(activePlan.exercise)}>
+            {language === 'en' ? 'Start Target' : 'Mulai Target'} <Icon name="arrow" size={14} />
+          </button>
+        </div>
+      </section>
+
       <section className="quick-section">
         <div className="section-title">
           <div>
@@ -576,7 +639,7 @@ function Home({ go }: { go: (screen: Screen) => void }) {
             {t('Lihat semua')} <Icon name="arrow" size={15} />
           </button>
         </div>
-        <button className="hero-workout" onClick={() => go('analyze')}>
+        <button className="hero-workout" onClick={() => onStartExercise('Push-up')}>
           <div className="workout-figure">
             <img src={pushupHero} alt="Atlet melakukan gerakan push-up" />
           </div>
@@ -589,17 +652,17 @@ function Home({ go }: { go: (screen: Screen) => void }) {
           </div>
         </button>
         <div className="exercise-row">
-          <button onClick={() => go('analyze')}>
+          <button onClick={() => onStartExercise('Squat')}>
             <span><Icon name="squat" size={28} /></span>
             <b>Squat</b>
             <small>{t('Lower body')}</small>
           </button>
-          <button onClick={() => go('analyze')}>
+          <button onClick={() => onStartExercise('Push-up')}>
             <span><Icon name="pushup" size={28} /></span>
             <b>Push-up</b>
             <small>{t('Upper body')}</small>
           </button>
-          <button onClick={() => go('analyze')}>
+          <button onClick={() => onStartExercise('Sit-up')}>
             <span><Icon name="situp" size={28} /></span>
             <b>Sit-up</b>
             <small>Core</small>
@@ -634,12 +697,18 @@ function Home({ go }: { go: (screen: Screen) => void }) {
 function Analyze({
   go,
   onSaveSession,
+  activePlan,
+  selectedExercise,
+  onChangeExercise,
 }: {
   go: (screen: Screen) => void
   onSaveSession: (record: SessionRecord) => void
+  activePlan: TrainingPlan
+  selectedExercise: ExerciseKind
+  onChangeExercise: (ex: ExerciseKind) => void
 }) {
   const [running, setRunning] = useState(false)
-  const [exercise, setExercise] = useState('Push-up')
+  const exercise = selectedExercise
   const { t, language } = useLanguage()
   const [cameraPermission, setCameraPermission] = useState<'prompt' | 'requesting' | 'granted' | 'denied'>('prompt')
   const [videoSource, setVideoSource] = useState<'webcam' | 'pushup_demo' | 'squat_demo' | 'custom_upload'>('webcam')
@@ -695,9 +764,9 @@ function Analyze({
   }, [])
 
   // Sinkronisasi Mode Latihan ke Backend AI SKELIO
-  const handleSelectExercise = async (item: string) => {
-    setExercise(item)
-    const backendMode = item === 'Push-up' ? 'PUSH-UP' : item === 'Squat' ? 'SQUAT' : item === 'Sit-up' ? 'SIT-UP' : 'AUTO'
+  const handleSelectExercise = async (item: ExerciseKind) => {
+    onChangeExercise(item)
+    const backendMode = item === 'Push-up' ? 'PUSH-UP' : item === 'Squat' ? 'SQUAT' : 'SIT-UP'
     try {
       await fetch('/api/set_mode', {
         method: 'POST',
@@ -747,9 +816,45 @@ function Analyze({
     }
   }
 
+  const targetReps = getPlanTotalReps(activePlan)
+  const [restSecondsLeft, setRestSecondsLeft] = useState(0)
+  const lastCompletedSetsRef = useRef(0)
+
+  const completedSets = getCompletedSetsCount(telemetry.rep_count, activePlan.sets)
+  const activeSetIndex = Math.min(completedSets, Math.max(0, activePlan.sets.length - 1))
+  const currentSet = activePlan.sets[activeSetIndex]
+  const repsBeforeCurrentSet = activePlan.sets
+    .slice(0, activeSetIndex)
+    .reduce((sum, s) => sum + Math.max(0, s.reps), 0)
+  const repsInCurrentSet = Math.max(0, telemetry.rep_count - repsBeforeCurrentSet)
+
+  useEffect(() => {
+    if (
+      running &&
+      completedSets > lastCompletedSetsRef.current &&
+      completedSets < activePlan.sets.length
+    ) {
+      const finishedSet = activePlan.sets[completedSets - 1]
+      if (finishedSet && finishedSet.restSeconds > 0) {
+        setRestSecondsLeft(finishedSet.restSeconds)
+      }
+    }
+    lastCompletedSetsRef.current = completedSets
+  }, [completedSets, running, activePlan.sets])
+
+  useEffect(() => {
+    if (restSecondsLeft <= 0) return
+    const timer = setInterval(() => {
+      setRestSecondsLeft((prev) => (prev > 1 ? prev - 1 : 0))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [restSecondsLeft])
+
   // Toggle Mulai / Selesai Analisis Sesi & Simpan ke Riwayat + Grafik
   const toggleSession = async () => {
     if (!running) {
+      lastCompletedSetsRef.current = 0
+      setRestSecondsLeft(0)
       try {
         await fetch('/api/session_start', { method: 'POST' })
       } catch (e) {
@@ -757,36 +862,65 @@ function Analyze({
       }
       setRunning(true)
     } else {
+      setRestSecondsLeft(0)
+      let sumData: {
+        total_reps?: number
+        clean_reps?: number
+        score?: number
+        duration_seconds?: number
+        duration_formatted?: string
+        accuracy_pct?: number
+        recommendations?: string[]
+      } = {}
+
       try {
         await fetch('/api/session_stop', { method: 'POST' })
-        // Ambil rekapitulasi data sesi dari AI Backend
         const sumRes = await fetch('/api/session_summary')
         if (sumRes.ok) {
-          const sumData = await sumRes.json()
-          const now = new Date()
-          const dateStr = `Hari ini, ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
-          const iconType = exercise.toLowerCase().replace(/[^a-z]/g, '')
-          
-          const newSessionRecord: SessionRecord = {
-            id: `session-${Date.now()}`,
-            type: exercise,
-            date: dateStr,
-            reps: `${sumData.total_reps || telemetry.rep_count} reps`,
-            repCount: sumData.total_reps || telemetry.rep_count,
-            cleanReps: sumData.clean_reps || telemetry.clean_reps,
-            score: sumData.score || Math.max(60, Math.min(100, Math.round(telemetry.clean_reps * 8 + 60))),
-            duration: sumData.duration_formatted || `${Math.floor(telemetry.session_duration / 60).toString().padStart(2, '0')}:${(telemetry.session_duration % 60).toString().padStart(2, '0')}`,
-            accuracy: sumData.accuracy_pct || 90,
-            avgAngle: telemetry.primary_angle || 85,
-            icon: iconType.includes('push') ? 'pushup' : iconType.includes('squat') ? 'squat' : 'situp',
-            feedback: sumData.recommendations?.[0] || 'Latihan selesai! Postur tubuh dan repetisi telah dicatat ke dalam analitik riwayat.',
-          }
-          
-          onSaveSession(newSessionRecord)
+          sumData = await sumRes.json()
         }
       } catch (e) {
         console.warn(e)
       }
+
+      const finalReps = Math.max(sumData.total_reps || 0, telemetry.rep_count)
+      const finalCleanReps = Math.max(sumData.clean_reps || 0, telemetry.clean_reps)
+      const finalDurationSec = sumData.duration_seconds ?? telemetry.session_duration
+      const finalCompletedSets = getCompletedSetsCount(finalReps, activePlan.sets)
+      const targetEvaluation = evaluateWorkoutTarget(
+        finalReps,
+        finalDurationSec,
+        targetReps,
+        activePlan.targetMinutes,
+        language,
+        finalCompletedSets,
+        activePlan.sets.length,
+      )
+
+      const now = new Date()
+      const dateStr = `Hari ini, ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+      const iconType = exercise.toLowerCase().replace(/[^a-z]/g, '')
+
+      const newSessionRecord: SessionRecord = {
+        id: `session-${Date.now()}`,
+        type: exercise,
+        date: dateStr,
+        reps: `${finalReps} reps`,
+        repCount: finalReps,
+        cleanReps: finalCleanReps,
+        score: sumData.score || Math.max(60, Math.min(100, Math.round(finalCleanReps * 8 + 60))),
+        duration: sumData.duration_formatted || formatSecondsClock(finalDurationSec),
+        accuracy: sumData.accuracy_pct || (finalReps > 0 ? Math.round((finalCleanReps / finalReps) * 100) : 90),
+        avgAngle: telemetry.primary_angle || 85,
+        icon: iconType.includes('push') ? 'pushup' : iconType.includes('squat') ? 'squat' : 'situp',
+        feedback: sumData.recommendations?.[0] || targetEvaluation.summary,
+        targetReps,
+        targetMinutes: activePlan.targetMinutes,
+        targetPlanName: activePlan.name,
+        targetEvaluation,
+      }
+
+      onSaveSession(newSessionRecord)
       setRunning(false)
     }
   }
@@ -979,7 +1113,7 @@ function Analyze({
             <Icon name="chevronDown" size={18} />
           </div>
           <div className="exercise-choices">
-            {['Push-up', 'Sit-up', 'Squat'].map((item) => (
+            {(['Push-up', 'Sit-up', 'Squat'] as ExerciseKind[]).map((item) => (
               <button
                 key={item}
                 className={exercise === item ? 'active' : ''}
@@ -989,6 +1123,65 @@ function Analyze({
               </button>
             ))}
           </div>
+
+          {/* Active Training Target Progress */}
+          {(() => {
+            const liveEval = evaluateWorkoutTarget(
+              telemetry.rep_count,
+              telemetry.session_duration,
+              targetReps,
+              activePlan.targetMinutes,
+              language,
+              completedSets,
+              activePlan.sets.length,
+            )
+            const barWidth = Math.min(100, Math.max(0, liveEval.percentage))
+            return (
+              <div className={`target-live-box status-${liveEval.status}`}>
+                <div className="target-live-top">
+                  <div>
+                    <small>{language === 'en' ? 'ACTIVE TARGET' : 'TARGET AKTIF'}</small>
+                    <b>{activePlan.name}</b>
+                  </div>
+                  <button type="button" onClick={() => go('trainingPlan')}>
+                    {language === 'en' ? 'Edit Target' : 'Atur Target'}
+                  </button>
+                </div>
+                <div className="target-live-numbers">
+                  <span>
+                    <b>{telemetry.rep_count}</b> / {targetReps} reps ({liveEval.percentage}%)
+                  </span>
+                  <span>
+                    ⏱ {formatSecondsClock(telemetry.session_duration)} / {formatMinutesClock(activePlan.targetMinutes)}
+                  </span>
+                </div>
+                <div className="target-progress-track">
+                  <div className="target-progress-fill" style={{ width: `${barWidth}%` }} />
+                </div>
+                <div className="target-sets-strip">
+                  <span>
+                    Set {Math.min(activeSetIndex + 1, activePlan.sets.length)}/{activePlan.sets.length} ·{' '}
+                    <b>
+                      {Math.min(repsInCurrentSet, currentSet?.reps ?? 0)}/{currentSet?.reps ?? 0}
+                    </b>{' '}
+                    reps
+                  </span>
+                  <span>{liveEval.headline}</span>
+                </div>
+                {restSecondsLeft > 0 && (
+                  <div className="target-rest-banner">
+                    <span>
+                      {language === 'en' ? 'Rest before next set:' : 'Istirahat sebelum set berikutnya:'}{' '}
+                      <b>{restSecondsLeft}s</b>
+                    </span>
+                    <button type="button" onClick={() => setRestSecondsLeft(0)}>
+                      {language === 'en' ? 'Skip' : 'Lewati'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Real-time Posture & Kinematics Feedback */}
           <div className={`posture-feedback ${isFormGood ? 'good' : 'warning'}`}>
@@ -1031,6 +1224,8 @@ function Analyze({
               onClick={async () => {
                 try {
                   await fetch('/api/reset_reps', { method: 'POST' })
+                  lastCompletedSetsRef.current = 0
+                  setRestSecondsLeft(0)
                   setTelemetry((prev) => ({ ...prev, rep_count: 0, clean_reps: 0, bad_reps: 0, depth_pct: 0 }))
                 } catch (e) {
                   console.warn(e)
@@ -1060,6 +1255,10 @@ export interface SessionRecord {
   avgAngle: number
   icon: string
   feedback: string
+  targetReps?: number
+  targetMinutes?: number
+  targetPlanName?: string
+  targetEvaluation?: TargetEvaluation
 }
 
 const initialSessions: SessionRecord[] = [
@@ -1214,7 +1413,10 @@ function History({
               <span className="session-icon"><Icon name={session.icon} size={25} /></span>
               <div>
                 <h3>{t(session.type)}</h3>
-                <p>{session.date} · {session.reps}</p>
+                <p>
+                  {session.date} · {session.reps}
+                  {session.targetEvaluation ? ` · ${session.targetEvaluation.headline}` : ''}
+                </p>
               </div>
               <span className="score">
                 <b>{session.score}</b>
@@ -1464,13 +1666,37 @@ function SessionDetail({
   go: (screen: Screen) => void
   session: SessionRecord
 }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const targetEval = session.targetEvaluation
   return (
     <DetailLayout title="Hasil analisis" eyebrow={`${t(session.type).toUpperCase()} · ${session.date.toUpperCase()}`} back={() => go('history')}>
       <section className="result-score">
         <div className="score-ring"><b>{session.score}</b><span>{t('SKOR')}</span></div>
         <div><span>{t('POSTUR KESELURUHAN')}</span><h2>{session.score >= 85 ? t('Sangat baik') : t('Perlu Bimbingan')}</h2><p>{session.feedback || t('Gerakan stabil dan kedalaman repetisi konsisten.')}</p></div>
       </section>
+      {targetEval && (
+        <section className={`target-eval-card status-${targetEval.status}`}>
+          <div className="target-eval-head">
+            <span>{language === 'en' ? 'TARGET CONCLUSION' : 'KESIMPULAN TARGET'}</span>
+            <em className="target-eval-badge">{targetEval.badge}</em>
+          </div>
+          <h3>{targetEval.headline}</h3>
+          <div className="target-eval-progress-meta">
+            <b>
+              {targetEval.actualReps} / {targetEval.targetReps} reps ({targetEval.percentage}%)
+            </b>
+            {session.targetPlanName && <small>{session.targetPlanName}</small>}
+          </div>
+          <div className="target-eval-track">
+            <div
+              className="target-eval-fill"
+              style={{ width: `${Math.min(100, Math.max(0, targetEval.percentage))}%` }}
+            />
+          </div>
+          <p>{targetEval.summary}</p>
+          <small className="target-eval-time">{targetEval.timeNote}</small>
+        </section>
+      )}
       <section className="result-metrics">
         <div><span>{t('REPETISI')}</span><b>{session.repCount}</b><small>{session.cleanReps} Clean reps</small></div>
         <div><span>{t('DURASI')}</span><b>{session.duration}</b><small>{t('Waktu aktif')}</small></div>
@@ -1677,6 +1903,141 @@ export default function App() {
   })
   const [selectedSession, setSelectedSession] = useState<SessionRecord>(sessions[0])
   const [language, setLanguage] = useState<Language>('id')
+  const [plans, setPlans] = useState<TrainingPlan[]>(() => {
+    try {
+      const saved = localStorage.getItem('skelio_plans')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch {
+      // Fallback
+    }
+    return DEFAULT_TRAINING_PLANS
+  })
+  const [activePlanId, setActivePlanId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('skelio_active_plan_id') || DEFAULT_TRAINING_PLANS[0].id
+    } catch {
+      return DEFAULT_TRAINING_PLANS[0].id
+    }
+  })
+  const activePlan = plans.find((p) => p.id === activePlanId) || plans[0]
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseKind>(activePlan.exercise)
+
+  const persistPlans = (nextPlans: TrainingPlan[], nextActiveId?: string) => {
+    setPlans(nextPlans)
+    try {
+      localStorage.setItem('skelio_plans', JSON.stringify(nextPlans))
+      if (nextActiveId) {
+        setActivePlanId(nextActiveId)
+        localStorage.setItem('skelio_active_plan_id', nextActiveId)
+      }
+    } catch (e) {
+      console.warn('Gagal menyimpan target latihan:', e)
+    }
+  }
+
+  const syncBackendMode = (ex: ExerciseKind) => {
+    const mode = ex === 'Push-up' ? 'PUSH-UP' : ex === 'Squat' ? 'SQUAT' : 'SIT-UP'
+    fetch('/api/set_mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }).catch(() => undefined)
+  }
+
+  const ensurePlanForExercise = (ex: ExerciseKind) => {
+    if (activePlan.exercise === ex) return
+    const matchingPlan = plans.find((p) => p.exercise === ex)
+    if (matchingPlan) {
+      setActivePlanId(matchingPlan.id)
+      try {
+        localStorage.setItem('skelio_active_plan_id', matchingPlan.id)
+      } catch {
+        // Ignore storage error
+      }
+      return
+    }
+    const rec = EXERCISE_RECOMMENDATIONS[ex][1]
+    const created: TrainingPlan = {
+      id: `plan-${ex.toLowerCase()}-${Date.now()}`,
+      name: `${ex} Target`,
+      description: rec.description,
+      exercise: ex,
+      difficulty: rec.difficulty,
+      targetMinutes: rec.targetMinutes,
+      sets: rec.sets.map((s, idx) => ({
+        id: `set-${Date.now()}-${idx}`,
+        reps: s.reps,
+        restSeconds: s.restSeconds,
+      })),
+    }
+    persistPlans([created, ...plans], created.id)
+  }
+
+  const handleChangeExercise = (ex: ExerciseKind) => {
+    setSelectedExercise(ex)
+    ensurePlanForExercise(ex)
+  }
+
+  const startExercise = (ex: ExerciseKind) => {
+    setSelectedExercise(ex)
+    ensurePlanForExercise(ex)
+    syncBackendMode(ex)
+    go('analyze')
+  }
+
+  const handleSaveAndStartPlan = (updatedPlan: TrainingPlan) => {
+    const exists = plans.some((p) => p.id === updatedPlan.id)
+    const nextPlans = exists
+      ? plans.map((p) => (p.id === updatedPlan.id ? updatedPlan : p))
+      : [updatedPlan, ...plans]
+    persistPlans(nextPlans, updatedPlan.id)
+    startExercise(updatedPlan.exercise)
+  }
+
+  const handleSelectPlan = (planId: string) => {
+    const found = plans.find((p) => p.id === planId)
+    if (found) {
+      setActivePlanId(planId)
+      setSelectedExercise(found.exercise)
+      try {
+        localStorage.setItem('skelio_active_plan_id', planId)
+      } catch {
+        // Ignore storage error
+      }
+    }
+  }
+
+  const handleCreateNewPlan = (newPlan: TrainingPlan) => {
+    persistPlans([newPlan, ...plans], newPlan.id)
+  }
+
+  const handleApplyQuickRecommendation = (ex: ExerciseKind) => {
+    const rec = EXERCISE_RECOMMENDATIONS[ex][1]
+    const existingForEx = plans.find((p) => p.exercise === ex)
+    const nextPlan: TrainingPlan = existingForEx
+      ? existingForEx
+      : {
+          id: `plan-${ex.toLowerCase()}-${Date.now()}`,
+          name: `${ex} Target`,
+          description: rec.description,
+          exercise: ex,
+          difficulty: rec.difficulty,
+          targetMinutes: rec.targetMinutes,
+          sets: rec.sets.map((s, idx) => ({
+            id: `set-${Date.now()}-${idx}`,
+            reps: s.reps,
+            restSeconds: s.restSeconds,
+          })),
+        }
+    const exists = plans.some((p) => p.id === nextPlan.id)
+    const nextPlans = exists ? plans : [nextPlan, ...plans]
+    persistPlans(nextPlans, nextPlan.id)
+    setSelectedExercise(ex)
+    go('trainingPlan')
+  }
 
   const go = (next: Screen) => {
     setPreviousScreen(screen)
@@ -1711,8 +2072,34 @@ export default function App() {
           {screen === 'login' && <AuthScreen mode="login" go={go} />}
           {screen === 'register' && <AuthScreen mode="register" go={go} />}
           {screen === 'forgotPassword' && <ForgotPassword go={go} />}
-          {screen === 'home' && <Home go={go} />}
-          {screen === 'analyze' && <Analyze go={go} onSaveSession={handleSaveSession} />}
+          {screen === 'home' && (
+            <Home
+              go={go}
+              activePlan={activePlan}
+              onStartExercise={startExercise}
+              onApplyRecommendation={handleApplyQuickRecommendation}
+            />
+          )}
+          {screen === 'analyze' && (
+            <Analyze
+              go={go}
+              onSaveSession={handleSaveSession}
+              activePlan={activePlan}
+              selectedExercise={selectedExercise}
+              onChangeExercise={handleChangeExercise}
+            />
+          )}
+          {screen === 'trainingPlan' && (
+            <TrainingPlanScreen
+              plans={plans}
+              activePlanId={activePlan.id}
+              onSaveAndStart={handleSaveAndStartPlan}
+              onSelectPlan={handleSelectPlan}
+              onCreateNewPlan={handleCreateNewPlan}
+              onBack={() => go(previousScreen === 'analyze' ? 'analyze' : 'home')}
+              lang={language}
+            />
+          )}
           {screen === 'history' && <History go={go} openSession={openSession} sessionList={sessions} />}
           {screen === 'analytics' && <Analytics go={go} sessionList={sessions} />}
           {screen === 'sessionDetail' && <SessionDetail go={go} session={selectedSession} />}
