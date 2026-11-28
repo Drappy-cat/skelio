@@ -5,7 +5,7 @@ import json
 import threading
 import cv2
 import numpy as np
-from flask import Flask, render_template, Response, jsonify, request, send_file
+from flask import Flask, Response, jsonify, request, send_file
 import io
 import csv
 
@@ -17,7 +17,21 @@ if ROOT_DIR not in sys.path:
 
 from core.biomechanical_pipeline import BiomechanicalPipeline
 
-app = Flask(__name__, template_folder=os.path.join(BASE_DIR, 'templates'), static_folder=os.path.join(BASE_DIR, 'static'))
+DIST_DIR = os.path.join(ROOT_DIR, 'dist')
+app = Flask(
+    __name__,
+    static_folder=os.path.join(BASE_DIR, 'static'),
+    static_url_path='/static'
+)
+
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+
 
 # Folder Penyimpanan Video Upload Pengguna
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
@@ -46,17 +60,21 @@ DEMO_VIDEOS = {
     "squat_demo": os.path.join(ROOT_DIR, "assets_sempro", "raw_squat_sample.mp4"),
 }
 
+pipeline_lock = threading.Lock()
+
 def get_pipeline():
     global pipeline
     if pipeline is None:
-        candidates = [
-            os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
-            os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
-            r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
-            os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
-        ]
-        model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
-        pipeline = BiomechanicalPipeline(pose_model_path=model_path)
+        with pipeline_lock:
+            if pipeline is None:
+                candidates = [
+                    os.path.join(ROOT_DIR, "models", "best_calisthenics_pose.pt"),
+                    os.path.join(ROOT_DIR, "models", "trained_weights", "yolo11m-pose", "weights", "best.pt"),
+                    r"C:\Users\Lenovo\Downloads\Dataset Video\training\runs\pose_models\yolo11m-pose\weights\best.pt",
+                    os.path.join(ROOT_DIR, "yolo11n-pose.pt"),
+                ]
+                model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
+                pipeline = BiomechanicalPipeline(pose_model_path=model_path)
     return pipeline
 
 def open_capture(source_key):
@@ -153,7 +171,27 @@ threading.Thread(target=stream_worker, daemon=True).start()
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
+        return send_file(os.path.join(DIST_DIR, 'index.html'))
+    return jsonify({
+        "error": "Frontend Vite belum di-build ke dist/.",
+        "hint": "Jalankan 'npm run build' atau buka Vite dev server di http://localhost:5173"
+    }), 503
+
+@app.route('/<path:path>')
+def static_proxy(path):
+    if path.startswith('api/'):
+        return jsonify({"error": "Not Found"}), 404
+    file_path = os.path.join(DIST_DIR, path)
+    if os.path.isfile(file_path):
+        return send_file(file_path)
+    static_fallback = os.path.join(BASE_DIR, 'static', path)
+    if os.path.isfile(static_fallback):
+        return send_file(static_fallback)
+    if os.path.isfile(os.path.join(DIST_DIR, 'index.html')):
+        return send_file(os.path.join(DIST_DIR, 'index.html'))
+    return "Not Found", 404
+
 
 @app.route('/video_feed')
 def video_feed():
@@ -451,12 +489,14 @@ def api_export_history():
 if __name__ == '__main__':
     port = 5000
     print(f"🚀 SKELIO Web Application siap berjalan di: http://localhost:{port}")
-    
-    # Buka browser otomatis saat server sudah dipastikan aktif dan siap
-    def open_browser_when_ready():
-        time.sleep(1.5)
-        import webbrowser
-        webbrowser.open(f"http://localhost:{port}")
-    
-    threading.Thread(target=open_browser_when_ready, daemon=True).start()
+
+    # Buka browser otomatis kecuali dinonaktifkan (mis. mode Fullstack Vite / App Window)
+    if os.environ.get("SKELIO_NO_BROWSER") != "1" and "--no-browser" not in sys.argv:
+        def open_browser_when_ready():
+            time.sleep(1.5)
+            import webbrowser
+            webbrowser.open(f"http://localhost:{port}")
+
+        threading.Thread(target=open_browser_when_ready, daemon=True).start()
+
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

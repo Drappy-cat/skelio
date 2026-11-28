@@ -18,9 +18,9 @@ __pycache__/
 *$py.class
 *.pyd
 .Python
-build/
+/build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
@@ -79,7 +79,8 @@ ehthumbs.db
 [0-9]*.[0-9]*.[0-9]*.md
 v[0-9]*.[0-9]*.[0-9]*.md
 
-# 7. Bare React Native & Android Gradle Build Artifacts
+# 7. Frontend (Vite) & Bare React Native / Android Gradle Artifacts
+node_modules/
 apps/mobile-rn/node_modules/
 apps/mobile-rn/android/.gradle/
 apps/mobile-rn/android/.cxx/
