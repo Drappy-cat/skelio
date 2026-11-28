@@ -5,7 +5,7 @@ import json
 import threading
 import cv2
 import numpy as np
-from flask import Flask, render_template, Response, jsonify, request, send_file
+from flask import Flask, Response, jsonify, request, send_file
 import io
 import csv
 
@@ -21,8 +21,7 @@ DIST_DIR = os.path.join(ROOT_DIR, 'dist')
 app = Flask(
     __name__,
     static_folder=os.path.join(BASE_DIR, 'static'),
-    static_url_path='/static',
-    template_folder=os.path.join(BASE_DIR, 'templates')
+    static_url_path='/static'
 )
 
 
@@ -174,7 +173,10 @@ threading.Thread(target=stream_worker, daemon=True).start()
 def index():
     if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
         return send_file(os.path.join(DIST_DIR, 'index.html'))
-    return render_template('index.html')
+    return jsonify({
+        "error": "Frontend Vite belum di-build ke dist/.",
+        "hint": "Jalankan 'npm run build' atau buka Vite dev server di http://localhost:5173"
+    }), 503
 
 @app.route('/<path:path>')
 def static_proxy(path):
